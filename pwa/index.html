@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0a0a" />
+  <title>Enkephalos Recorder</title>
+
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" href="./icon-192.png" type="image/png" />
+  <link rel="stylesheet" href="./styles.css" />
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <main id="app">
+
+    <section id="screen-home" class="screen">
+      <header class="screen-header">
+        <h1>Enkephalos Recorder</h1>
+      </header>
+
+      <div id="drive-banner" class="drive-banner" hidden>
+        <span id="drive-banner-text">Google Drive verbinden.</span>
+        <button type="button" id="drive-connect-btn" class="btn-primary btn-small">Verbinden</button>
+      </div>
+
+      <div class="mode-grid">
+        <a class="mode-btn" href="#idea" data-mode="idea">
+          <span class="mode-btn-label">Kurze Idee</span>
+          <span class="mode-btn-hint">Auto-Stopp nach 3s Stille &middot; max. 2 Min</span>
+        </a>
+        <a class="mode-btn" href="#meeting" data-mode="meeting">
+          <span class="mode-btn-label">Meeting</span>
+          <span class="mode-btn-hint">Start / Stopp manuell &middot; bis 60 Min</span>
+        </a>
+      </div>
+
+      <section class="history">
+        <h2>Zuletzt</h2>
+        <ul id="history-list" class="history-list" aria-live="polite"></ul>
+        <p id="history-empty" class="history-empty">Noch keine Aufnahmen.</p>
+      </section>
+    </section>
+
+    <section id="screen-meeting" class="screen" aria-hidden="true">
+      <header class="screen-header">
+        <a class="back-link" href="#home" aria-label="Zurueck">&larr; Zurueck</a>
+      </header>
+
+      <div class="rec-body">
+        <div class="rec-indicator" aria-hidden="true">
+          <span class="rec-dot"></span>
+          <span class="rec-label">REC</span>
+        </div>
+
+        <div id="meeting-timer" class="rec-timer">00:00</div>
+
+        <div class="waveform" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+
+        <button type="button" id="meeting-stop" class="stop-btn" disabled>Stopp</button>
+        <p class="rec-note" id="meeting-note">Mikrofon wird initialisiert &hellip;</p>
+      </div>
+    </section>
+
+    <section id="screen-idea" class="screen" aria-hidden="true">
+      <header class="screen-header">
+        <a class="back-link" href="#home" aria-label="Abbrechen">&larr; Abbrechen</a>
+      </header>
+
+      <div class="rec-body idea-body">
+        <div class="pulse" aria-hidden="true"></div>
+        <p id="idea-hint" class="idea-hint">Mikrofon wird initialisiert &hellip;</p>
+        <p class="idea-subhint">Stoppt automatisch nach 3 Sekunden Stille.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="title-modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="title-modal-heading">
+      <h2 id="title-modal-heading">Meeting speichern</h2>
+
+      <label class="modal-label" for="meeting-category">Kategorie</label>
+      <select id="meeting-category" class="modal-select">
+        <option value="jf Abteilungsleiter">jf Abteilungsleiter</option>
+        <option value="jf Oberaerzte-Reha">jf Oberaerzte-Reha</option>
+        <option value="jf Oberaerzte-Akut">jf Oberaerzte-Akut</option>
+        <option value="jf Therapien, Therapieplanung und Controlling">jf Therapien, Therapieplanung und Controlling</option>
+        <option value="jf Klinikleitung-Interdisziplinaer">jf Klinikleitung-Interdisziplinaer</option>
+        <option value="jf Klinikleitung-Aerzte">jf Klinikleitung-Aerzte</option>
+        <option value="jf Personal">jf Personal</option>
+        <option value="jf SKAI-Team">jf SKAI-Team</option>
+        <option value="jf Tagesklinik">jf Tagesklinik</option>
+        <option value="jf Geschaeftsfuehrung">jf Geschaeftsfuehrung</option>
+        <option value="Sonstiges Meeting">Sonstiges Meeting</option>
+      </select>
+
+      <label class="modal-label" for="title-input">Zusatz (optional)</label>
+      <input id="title-input" type="text" autocomplete="off" spellcheck="false" placeholder="z.B. Q2 Review" />
+
+      <div class="modal-actions">
+        <button type="button" id="title-ok" class="btn-primary">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="md-modal" class="modal" hidden>
+    <div class="modal-card md-card" role="dialog" aria-modal="true" aria-labelledby="md-title">
+      <header class="md-header">
+        <h2 id="md-title">Transkript</h2>
+        <button type="button" id="md-close" class="md-close" aria-label="Schliessen">&times;</button>
+      </header>
+      <pre id="md-body" class="md-body"></pre>
+      <div class="modal-actions md-actions" hidden id="md-actions">
+        <button type="button" id="md-retry" class="btn-primary">Erneut versuchen</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

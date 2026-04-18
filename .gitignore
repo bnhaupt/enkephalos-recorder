@@ -1,0 +1,16 @@
+# Lokale Keys — nie committen
+pwa/config.js
+
+# Claude Code lokale Settings
+.claude/settings.local.json
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Node (falls spaeter eingesetzt)
+node_modules/
+npm-debug.log

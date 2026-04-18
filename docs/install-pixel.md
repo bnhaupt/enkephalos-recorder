@@ -5,10 +5,11 @@
 Die PWA muss ueber HTTPS erreichbar sein (Mikrofon- und Storage-APIs funktionieren nur in sicheren Kontexten). Zwei empfohlene Wege:
 
 ### Option A: GitHub Pages (empfohlen fuer v1)
-1. Ordner `pwa/` in ein GitHub-Repo pushen
-2. Repo → Settings → Pages → Source: `main` branch, Folder: `/pwa`
-3. Nach ~1 Min ist die App verfuegbar unter `https://<username>.github.io/<repo>/`
+1. Repo nach GitHub pushen (`enkephalos-recorder`, public)
+2. Repo → Settings → Pages → Source: `Deploy from a branch`, Branch: `main`, Folder: `/ (root)`
+3. Nach ~1 Min ist die App verfuegbar unter `https://<username>.github.io/enkephalos-recorder/` (Root-Redirect leitet nach `/pwa/`)
 4. Kostenlos, HTTPS automatisch, kein Server-Hosting-Drama
+5. **OAuth-Client-ID** (Google Cloud Console → Credentials) um die neue Origin `https://<username>.github.io` als „Authorized JavaScript origin" erweitern, sonst schlaegt der Drive-Login auf dem Pixel fehl.
 
 ### Option B: Netlify / Cloudflare Pages
 Wenn du mehr Kontrolle willst — aber fuer v1 Overkill.

@@ -52,6 +52,10 @@ Kurzer Einstieg, um nach Pause weiterzumachen.
 - OAuth-Origin `https://bnhaupt.github.io` ist im Google-Cloud-Client hinterlegt.
 - Auf dem Pixel installiert und laeuft.
 
+## Bei Problemen
+
+`docs/troubleshooting.md` — Schnell-Checks pro Pipeline-Stufe, Key/Token-Landkarte, haeufige Fehlerbilder, Reset-Pfade.
+
 ## Zentrale Datei-Map
 
 ```

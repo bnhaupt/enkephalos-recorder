@@ -4,6 +4,9 @@ pwa/config.js
 # Claude Code lokale Settings
 .claude/settings.local.json
 
+# Python
+__pycache__/
+
 # OS / Editor
 .DS_Store
 Thumbs.db

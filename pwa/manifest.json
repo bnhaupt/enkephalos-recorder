@@ -1,6 +1,6 @@
 {
-  "name": "Enkephalos Recorder",
-  "short_name": "Enkephalos",
+  "name": "Claudia",
+  "short_name": "Claudia",
   "description": "Sprachaufnahmen fuer das Enkephalos-Vault: Kurze Ideen und Meetings bis 1h.",
   "start_url": "./index.html",
   "display": "standalone",

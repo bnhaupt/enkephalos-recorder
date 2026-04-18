@@ -13,9 +13,9 @@
 # docs/laptop-sync.md; den tatsaechlichen Drive-Pfad sieht man im
 # Google-Drive-Desktop-Client (z.B. `G:\Meine Ablage\Enkephalos-Inbox`).
 
-$DriveInbox = "$env:USERPROFILE\Google Drive\Enkephalos-Inbox"
-$VaultInbox = "$env:USERPROFILE\Documents\Enkephalos\inbox"
-$LogFile    = "$env:USERPROFILE\Documents\Enkephalos\sync-inbox.log"
+$DriveInbox = "G:\Meine Ablage\Enkephalos-Inbox"
+$VaultInbox = "$env:USERPROFILE\OneDrive\Enkephalos\inbox"
+$LogFile    = "$env:USERPROFILE\OneDrive\Enkephalos\sync-inbox.log"
 
 # ---------- Ausfuehrung ----------
 

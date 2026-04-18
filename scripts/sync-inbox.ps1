@@ -1,21 +1,24 @@
 # sync-inbox.ps1
 #
-# Verschiebt neue .md-Dateien aus dem Google-Drive-Sync-Ordner
-# `Enkephalos-Inbox/` nach `<Enkephalos>/inbox/` im lokalen Vault.
+# Holt neue .md-Dateien aus Google Drive `Enkephalos-Inbox/` via rclone
+# und verschiebt sie ins lokale Vault `<Enkephalos>/inbox/`. Quell-Dateien
+# werden nach erfolgreichem Transfer in Drive geloescht (rclone move).
+#
+# Setup-Voraussetzungen (einmalig):
+#   1. rclone installiert (winget install Rclone.Rclone)
+#   2. Remote `gdrive` konfiguriert (rclone config reconnect gdrive:)
 #
 # Aufruf manuell:
 #   powershell -ExecutionPolicy Bypass -File .\scripts\sync-inbox.ps1
 #
-# Oder als Task Scheduler Task alle 5 Minuten (siehe docs/laptop-sync.md §3).
+# Oder als Task-Scheduler-Task alle 5 Minuten (siehe docs/laptop-sync.md).
 
 # ---------- Konfiguration ----------
-# Pfade an die eigene Installation anpassen. Vorlage gemaess
-# docs/laptop-sync.md; den tatsaechlichen Drive-Pfad sieht man im
-# Google-Drive-Desktop-Client (z.B. `G:\Meine Ablage\Enkephalos-Inbox`).
 
-$DriveInbox = "G:\Meine Ablage\Enkephalos-Inbox"
-$VaultInbox = "$env:USERPROFILE\OneDrive\Enkephalos\inbox"
-$LogFile    = "$env:USERPROFILE\OneDrive\Enkephalos\sync-inbox.log"
+$RcloneExe    = "$env:LOCALAPPDATA\Microsoft\WinGet\Links\rclone.exe"
+$RcloneRemote = "gdrive:Enkephalos-Inbox"
+$VaultInbox   = "$env:USERPROFILE\OneDrive\Enkephalos\inbox"
+$LogFile      = "$env:USERPROFILE\OneDrive\Enkephalos\sync-inbox.log"
 
 # ---------- Ausfuehrung ----------
 
@@ -37,9 +40,9 @@ function Write-Log {
     }
 }
 
-if (-not (Test-Path -LiteralPath $DriveInbox)) {
-    Write-Log "Drive-Inbox nicht gefunden: $DriveInbox -- ueberspringe."
-    exit 0
+if (-not (Test-Path -LiteralPath $RcloneExe)) {
+    Write-Log "rclone nicht gefunden: $RcloneExe -- Abbruch. Installation: winget install Rclone.Rclone"
+    exit 1
 }
 
 if (-not (Test-Path -LiteralPath $VaultInbox)) {
@@ -47,29 +50,37 @@ if (-not (Test-Path -LiteralPath $VaultInbox)) {
     Write-Log "Vault-Inbox angelegt: $VaultInbox"
 }
 
-$files = Get-ChildItem -LiteralPath $DriveInbox -Filter "*.md" -File -ErrorAction SilentlyContinue
-if (-not $files -or $files.Count -eq 0) {
-    exit 0
+# rclone schreibt INFO/NOTICE auf stderr. PowerShell 5.1 wuerde das bei
+# ErrorActionPreference=Stop als Exception werten, auch wenn rclone exit 0
+# liefert. Deshalb lokal nur fuer den rclone-Aufruf relaxen.
+$output = $null
+$code = 0
+try {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $output = & $RcloneExe move $RcloneRemote $VaultInbox --include "*.md" --stats 0 -v 2>&1
+    $code = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $prev
 }
 
 $moved = 0
-$skipped = 0
-foreach ($f in $files) {
-    $target = Join-Path $VaultInbox $f.Name
-    if (Test-Path -LiteralPath $target) {
-        Write-Log "Skip (existiert schon): $($f.Name)"
-        $skipped++
-        continue
-    }
-    try {
-        Move-Item -LiteralPath $f.FullName -Destination $target
-        Write-Log "Moved: $($f.Name)"
+foreach ($line in $output) {
+    $text = [string]$line
+    if ($text -match "INFO\s+:\s+(.+):\s+Copied \(new\)") {
+        Write-Log "Moved: $($matches[1])"
         $moved++
-    } catch {
-        Write-Log "Fehler bei $($f.Name): $_"
+    }
+    elseif ($text -match "ERROR|Failed") {
+        Write-Log "rclone: $text"
     }
 }
 
-if ($moved -gt 0 -or $skipped -gt 0) {
-    Write-Log "Lauf beendet: $moved verschoben, $skipped uebersprungen."
+if ($code -ne 0) {
+    Write-Log "rclone exit=$code -- Lauf fehlgeschlagen."
+    exit $code
+}
+
+if ($moved -gt 0) {
+    Write-Log "Lauf beendet: $moved verschoben."
 }

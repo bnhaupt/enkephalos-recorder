@@ -1,91 +1,96 @@
 # Laptop-Sync: Google Drive → Enkephalos/inbox/
 
-Die fertigen Markdown-Dateien landen via PWA in `Google Drive:/Enkephalos-Inbox/`. Der Samsung-Laptop synct sie lokal.
+Die fertigen Markdown-Dateien landen via PWA in `Google Drive:/Enkephalos-Inbox/`. Der Samsung-Laptop holt sie via **rclone** ins Vault.
 
-## 1. Google Drive Desktop installieren
+## Warum rclone, nicht Google Drive Desktop?
 
-1. Download: https://www.google.com/drive/download/
-2. Installieren, mit demselben Google-Account einloggen, der auch in der PWA verwendet wird
-3. Im Setup: "Meine Ablage mit diesem Computer synchronisieren"
-4. Pfad merken, typischerweise `C:\Users\<user>\Google Drive\` oder `G:\Meine Ablage\` (je nach Windows-Einstellung "Stream vs. Mirror")
-5. **Empfehlung:** Mirror-Modus waehlen (nicht Stream). Damit sind die Dateien offline verfuegbar und koennen ohne Internetverbindung gelesen werden.
+Google Drive Desktop konkurriert auf dem Laptop mit OneDrive am selben Dateisystem — das hat beim Nutzer schon zu zerschossenen Dateien gefuehrt. rclone umgeht das: spricht die Drive-API direkt an, braucht keinen Desktop-Client, kein G:-Laufwerk, keine Sync-Kaskaden.
 
-Nach der Einrichtung findest du den Ordner `Enkephalos-Inbox` unter:
-`<Drive-Pfad>\Enkephalos-Inbox\`
+## 1. Einmaliges Setup
 
-## 2. Option A: Keine Automatisierung (v1)
+### rclone installieren
 
-Fuer v1 reicht es, den Drive-Ordner einfach zu kennen. Beim "Inbox durchgehen" mit Claude Cowork:
-
-1. Neue Dateien in `<Drive-Pfad>\Enkephalos-Inbox\` anschauen
-2. Relevante manuell nach `<Enkephalos>\inbox\` kopieren (Claude Cowork kann das auch)
-3. Ingest-Workflow (§4.1 der Enkephalos-CLAUDE.md) wird ausgeloest
-4. Drive-Original kann anschliessend manuell geloescht werden
-
-## 3. Option B: Automatisierung per PowerShell-Task
-
-Wenn du v1 ein paar Tage genutzt hast und Automatisierung willst: Ein PowerShell-Skript, das alle 5 Min neue .md-Dateien aus dem Drive-Sync-Ordner nach Enkephalos verschiebt.
-
-### Skript: `sync-inbox.ps1`
-
-```powershell
-# sync-inbox.ps1
-# Verschiebt neue .md-Dateien aus dem Drive-Sync-Ordner nach Enkephalos/inbox/
-
-$DriveInbox = "C:\Users\<user>\Google Drive\Enkephalos-Inbox"
-$VaultInbox = "C:\Users\<user>\Documents\Enkephalos\inbox"
-
-if (-not (Test-Path $VaultInbox)) {
-    New-Item -ItemType Directory -Path $VaultInbox | Out-Null
-}
-
-Get-ChildItem -Path $DriveInbox -Filter "*.md" -File | ForEach-Object {
-    $target = Join-Path $VaultInbox $_.Name
-    if (-not (Test-Path $target)) {
-        Move-Item -Path $_.FullName -Destination $target
-        Write-Host "Moved: $($_.Name)"
-    }
-}
+```
+winget install Rclone.Rclone
 ```
 
-Pfade anpassen.
+Binary landet unter `%LOCALAPPDATA%\Microsoft\WinGet\Links\rclone.exe` und ist damit im `PATH` (nach Shell-Neustart).
 
-### Als Task Scheduler einrichten
+### OAuth-Remote konfigurieren
 
-1. Task Scheduler oeffnen (Windows-Taste, "Task Scheduler")
-2. "Create Basic Task"
-3. Name: `Enkephalos Inbox Sync`
-4. Trigger: `Daily`, Start Time: `08:00`, "Recur every 1 day"
-5. Advanced: "Repeat task every 5 minutes, for a duration of 24 hours"
-6. Action: `Start a program`
-   - Program: `powershell.exe`
-   - Arguments: `-ExecutionPolicy Bypass -File "C:\path\to\sync-inbox.ps1"`
-7. Settings: "Run task as soon as possible after a scheduled start is missed"
+```
+rclone config reconnect gdrive:
+```
 
-## 4. Option C: Drive-Ordner IST Enkephalos-Inbox
+- Erste Frage „Use web browser?" → `y`
+- Browser oeffnet, Google-Account auswaehlen, rclone-Zugriff bestaetigen
+- Bei „unverifizierte App"-Warnung: „Erweitert" → „Fortfahren"
+- Zweite Frage „Shared Drive?" → `n`
 
-Radikaler: Das Vault-`inbox/`-Verzeichnis direkt auf den Drive-Sync-Ordner zeigen lassen.
+Token landet in `%APPDATA%\rclone\rclone.conf`. Halbwertszeit: unbegrenzt (Refresh-Token), solange der Google-Account den Zugriff nicht widerruft.
 
-**Vorteil:** Keine Kopier-Skripte, keine Automatisierung noetig.
-**Nachteil:** Wenn du das Enkephalos-Vault selbst syncen willst (z.B. via OneDrive), entsteht ein Sync-Kaskaden-Problem. Auch: Drive-Client-Eigenheiten koennen die Inbox-Verarbeitung stoeren (z.B. Lock-Files, temporaere Ghost-Dateien waehrend Sync).
+### Test
 
-**Empfehlung:** Nur machen, wenn das Enkephalos-Vault ausschliesslich lokal bleibt.
+```
+rclone lsf gdrive:Enkephalos-Inbox/
+```
 
-Umsetzung:
-1. Den Drive-Ordner `Enkephalos-Inbox` nach `<Enkephalos>\inbox\` symlinken (via mklink oder Junction Point)
-2. In Enkephalos-CLAUDE.md erwaehnen, dass inbox/ ein Mountpoint ist und nicht manuell editiert werden soll
+Listet die .md-Dateien im Drive-Ordner.
 
-## 5. Datei-Hygiene
+## 2. Sync-Skript
 
-Wichtig fuer das Ingest-Pattern:
+`scripts/sync-inbox.ps1` im Repo. Konfiguration oben im Skript:
 
-- **Nach erfolgreichem Ingest** (Datei wurde nach raw/ verschoben oder geloescht laut §4.1) sollte die Datei auch im Drive nicht mehr liegen — sonst resyncht sie beim nächsten Durchlauf wieder.
-- Variante 1 (Option B oben): Drive → Lokale Inbox verschieben, dadurch wird Drive automatisch leer.
-- Variante 2 (Option A manuell): Nach Ingest auch im Drive manuell loeschen.
+- `$RcloneRemote` — Drive-Quelle (Standard: `gdrive:Enkephalos-Inbox`)
+- `$VaultInbox`  — lokales Ziel (Standard: `%USERPROFILE%\OneDrive\Enkephalos\inbox`)
+- `$LogFile`     — Log (`%USERPROFILE%\OneDrive\Enkephalos\sync-inbox.log`)
 
-## 6. Bandbreite und Speicher
+Lauf:
 
-- Eine Idee-Markdown: ~2-5 KB
-- Ein 1h-Meeting-Markdown mit Volltranskript: ~30-100 KB
-- Audios werden **nicht** in Drive gespeichert (Gemini bekommt sie ephemer)
-- Realistisches monatliches Volumen: < 5 MB. Vernachlaessigbar.
+```
+powershell -ExecutionPolicy Bypass -File C:\Users\bjoer\OneDrive\05_Dev\voice-pipeline\scripts\sync-inbox.ps1
+```
+
+Verhalten: `rclone move --include "*.md"` — verschiebt jede .md-Datei einzeln und loescht das Drive-Original nach erfolgreichem Transfer. Bei einem Fehler bleibt das Original in Drive und wird beim naechsten Lauf erneut versucht.
+
+## 3. Automatisierung per Task Scheduler
+
+Alle 5 Min laufen lassen — so landen frisch transkribierte Aufnahmen in wenigen Minuten im Vault.
+
+### Per Befehlszeile
+
+```
+schtasks /Create /TN "Enkephalos Inbox Sync" /TR "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"C:\Users\bjoer\OneDrive\05_Dev\voice-pipeline\scripts\sync-inbox.ps1\"" /SC MINUTE /MO 5 /RL LIMITED /F
+```
+
+Task laeuft im Hintergrund (kein Fenster-Popup), alle 5 Minuten, mit den Rechten des aktuellen Users.
+
+### Task entfernen
+
+```
+schtasks /Delete /TN "Enkephalos Inbox Sync" /F
+```
+
+### Task manuell triggern
+
+```
+schtasks /Run /TN "Enkephalos Inbox Sync"
+```
+
+## 4. Troubleshooting
+
+**„rclone nicht gefunden"**
+- `winget install Rclone.Rclone` neu laufen lassen
+- Pruefen: `%LOCALAPPDATA%\Microsoft\WinGet\Links\rclone.exe` vorhanden?
+
+**„Token expired"**
+- `rclone config reconnect gdrive:` erneut durchlaufen lassen
+- Sollte selten noetig sein, Refresh-Token haelt langfristig
+
+**Dateien bleiben in Drive liegen trotz Sync**
+- `sync-inbox.log` pruefen (`%USERPROFILE%\OneDrive\Enkephalos\sync-inbox.log`)
+- Manueller Lauf mit `-v` an rclone: `rclone move gdrive:Enkephalos-Inbox ...\inbox --include "*.md" -v`
+
+**Bandbreite und Speicher**
+- Idee-Markdown: ~2-5 KB. Meeting-Markdown mit Volltranskript: ~30-100 KB.
+- Realistisches Monatsvolumen: <5 MB. Vernachlaessigbar.

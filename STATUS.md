@@ -31,10 +31,12 @@ Kurzer Einstieg, um nach Pause weiterzumachen.
 
 ## Was noch offen ist
 
-### Laptop-Drive-Sync (manuelle Einrichtung)
-- **Google Drive Desktop** auf dem Samsung-Laptop installieren (Mirror-Modus), mit demselben Google-Account wie in der PWA.
-- **`scripts/sync-inbox.ps1`** existiert. Pfade `$DriveInbox` und `$VaultInbox` oben anpassen, einmal manuell testen.
-- Optional: Task Scheduler alle 5 Min (Anleitung in `docs/laptop-sync.md §3`).
+### Laptop-Drive-Sync [fertig 2026-04-18]
+- **rclone** statt Google Drive Desktop (Drive Desktop konfligiert mit OneDrive auf demselben Dateisystem).
+- `rclone.exe` via winget installiert, Remote `gdrive` via OAuth konfiguriert (Token in `%APPDATA%\rclone\rclone.conf`).
+- `scripts/sync-inbox.ps1` ruft `rclone move gdrive:Enkephalos-Inbox → %USERPROFILE%\OneDrive\Enkephalos\inbox --include "*.md"` auf.
+- Task Scheduler `"Enkephalos Inbox Sync"` laeuft alle 5 Min im Hintergrund (registriert via `scripts/install-task.cmd`).
+- End-to-End getestet: 6 Bestandsaufnahmen sowie eine Dummy-Datei wurden korrekt ins Vault verschoben, Drive-Originale geloescht.
 
 ### Phase 5 — Polish (reihenfolge nach Impact)
 1. **Chunk-Upload + Auto-Split fuer Meetings >30 Min** — Qualitaet + Recovery bei Netz-Drop. Grosster funktionaler Gewinn.
@@ -80,8 +82,8 @@ docs/                # Setup-Anleitungen (alle fertig)
 
 Nach Pause an einer dieser Stellen ansetzen:
 
-- **„Drive-Desktop-Sync abschliessen"** (manueller Schritt, ca. 10 Min) — dann ist der End-to-End-Flow bis ins Vault geschlossen.
 - **„Phase 5 #1 Chunk-Upload fuer Meetings >30 Min"** (~200 Zeilen, in `recorder.js` + `gemini.js`) — Qualitaetsschub fuer lange Termine.
+- **„Phase 5 #2 Recovery bei App-Reload waehrend Aufnahme"** — IndexedDB-Chunks beim Start pruefen.
 
 Lokaler Dev-Server laeuft auf `http://127.0.0.1:8765/pwa/` (Python static server).
 Produktiv: https://bnhaupt.github.io/enkephalos-recorder/ (auf `main` pushen deployed automatisch).

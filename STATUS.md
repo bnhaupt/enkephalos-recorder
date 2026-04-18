@@ -1,4 +1,4 @@
-# Voice Pipeline — Stand 2026-04-18 (Pixel live)
+# Voice Pipeline — Stand 2026-04-18 (produktiv, Phase 5 bewusst zurueckgestellt)
 
 Kurzer Einstieg, um nach Pause weiterzumachen.
 
@@ -7,7 +7,8 @@ Kurzer Einstieg, um nach Pause weiterzumachen.
 **Phase 1 — UI-Shell + IndexedDB** [fertig]
 - Drei Screens (Home, Meeting, Idee), Hash-Router, History-Liste.
 - IndexedDB `enkephalos-recorder`, Stores `config` + `recordings`.
-- Platzhalter-Icons (192/512, Buchstabe E).
+- Icon: stilisiertes Frauengesicht in Claude-Coral, „Claudia"-Schriftzug. Quelle unter `assets/claudia-icon-source.png`, Skalierung auf 192/512 via `scripts/make-icons.py` (bzw. direktes Resize aus der Quelle).
+- App-Name im Manifest: `Claudia` (name und short_name) — erscheint so auf dem Pixel-Homescreen.
 
 **Phase 2 — Aufnahme lokal** [fertig]
 - `pwa/recorder.js`: MediaRecorder + RMS-Level via Web-Audio.
@@ -38,12 +39,21 @@ Kurzer Einstieg, um nach Pause weiterzumachen.
 - Task Scheduler `"Enkephalos Inbox Sync"` laeuft alle 5 Min im Hintergrund (registriert via `scripts/install-task.cmd`).
 - End-to-End getestet: 6 Bestandsaufnahmen sowie eine Dummy-Datei wurden korrekt ins Vault verschoben, Drive-Originale geloescht.
 
-### Phase 5 — Polish (reihenfolge nach Impact)
-1. **Chunk-Upload + Auto-Split fuer Meetings >30 Min** — Qualitaet + Recovery bei Netz-Drop. Grosster funktionaler Gewinn.
-2. **Recovery bei App-Reload waehrend Aufnahme** — IndexedDB-Chunks beim Start pruefen.
-3. **Setup-Wizard beim ersten Start** — `prompt()`-Kette durch 3-Schritt-Flow ersetzen.
-4. **Offline-Queue mit Reconnect + Backoff** — fuer unzuverlaessiges WLAN in der Klinik.
-5. **Update-Prompt bei neuem Service-Worker** — statt Auto-Reload.
+### Phase 5 — Polish [bewusst zurueckgestellt am 2026-04-18]
+
+Entscheidung des Nutzers: App laeuft, Phase 5 ist kein Blocker. Erst angehen, wenn real ein Problem auftritt (verlorene Aufnahme, schlechte Qualitaet am Ende langer Meetings, umstaendliches Onboarding fuer andere Nutzer).
+
+**Wiederaufnahme-Trigger pro Punkt:**
+
+1. **Chunk-Upload + Auto-Split fuer Meetings >30 Min** — trigger: Nutzer meldet, dass Transkript am Ende langer Termine unsauber wird, oder Aufnahme wird von Chrome unterbrochen (Background-Throttling / Akku). ~200 Zeilen in `recorder.js` + `gemini.js`. Besteht aus zwei Teil-Scopes:
+   - *Chunk-Recovery*: `MediaRecorder({ timeslice: 60000 })`, Chunks in neuen IDB-Store `recording_chunks` persistieren, beim App-Start auf unvollstaendige Aufnahme pruefen.
+   - *Auto-Split*: Bei 30 Min Timer aktiven Recorder stoppen, neuen starten. Zwei Gemini-Calls + Consolidation-Call fuer das Merged-Markdown.
+2. **Recovery bei App-Reload waehrend Aufnahme** — trigger: Nutzer meldet, dass eine laufende Aufnahme verloren ging. IndexedDB-Chunks beim Start pruefen (greift in Punkt 1).
+3. **Setup-Wizard beim ersten Start** — trigger: Zweiter Nutzer kommt dazu, `prompt()`-Kette ist zu sperrig. 3-Schritt-Flow mit echten Formularen.
+4. **Offline-Queue mit Reconnect + Backoff** — trigger: Aufnahmen haengen regelmaessig auf `error` wegen Klinik-WLAN. Aktuell deckt der Retry-Button im Markdown-Modal den Einzelfall.
+5. **Update-Prompt bei neuem Service-Worker** — trigger: Auto-Reload beim SW-Update stoert im Alltag (Flash). Ersatz durch „Update verfuegbar"-Banner.
+
+**Wenn der Nutzer zurueckkommt mit „wir wollten an Phase 5 weitermachen":** Ersten Trigger-Grund erfragen (was ist konkret passiert?), dann passenden Punkt aus der Liste anwaehlen. Nicht alles auf einmal.
 
 ### Pixel-Deployment [fertig 2026-04-18]
 - Repo: https://github.com/bnhaupt/enkephalos-recorder (public)
@@ -65,13 +75,17 @@ pwa/
 ├── recorder.js      # MediaRecorder + Silence-Detection
 ├── gemini.js        # Files API + generateContent + Prompts
 ├── drive.js         # OAuth + Folder + Multipart-Upload + Slug
-├── sw.js            # v8, Network-First auf localhost, Cache-First auf Produktion
+├── sw.js            # v9, Network-First auf localhost, Cache-First auf Produktion
 ├── styles.css
-├── manifest.json
-└── icon-192.png, icon-512.png  # Platzhalter
+├── manifest.json    # name/short_name = "Claudia"
+└── icon-192.png, icon-512.png  # Claudia-Icon (Quelle in assets/)
+assets/
+└── claudia-icon-source.png  # 1024px, vom Nutzer geliefert
 scripts/
-└── sync-inbox.ps1   # Laptop-Sync (noch zu aktivieren)
-docs/                # Setup-Anleitungen (alle fertig)
+├── sync-inbox.ps1      # rclone move aus gdrive:Enkephalos-Inbox ins Vault
+├── install-task.cmd    # registriert Scheduled Task "Enkephalos Inbox Sync"
+└── make-icons.py       # PIL-Fallback fuer Icons (Quelle manuell ersetzbar)
+docs/                   # Setup-Anleitungen + troubleshooting.md
 ```
 
 ## Entschiedene Design-Punkte (nicht aus dem Code erkennbar)
@@ -84,10 +98,11 @@ docs/                # Setup-Anleitungen (alle fertig)
 
 ## Wo weitermachen
 
-Nach Pause an einer dieser Stellen ansetzen:
+Aktuell: **nirgends** — alle Pipeline-Schritte produktiv, Icon/Branding fertig, Phase 5 bewusst zurueckgestellt (siehe oben).
 
-- **„Phase 5 #1 Chunk-Upload fuer Meetings >30 Min"** (~200 Zeilen, in `recorder.js` + `gemini.js`) — Qualitaetsschub fuer lange Termine.
-- **„Phase 5 #2 Recovery bei App-Reload waehrend Aufnahme"** — IndexedDB-Chunks beim Start pruefen.
+Wenn der Nutzer zurueckkommt:
+- Bei konkretem Problem → `docs/troubleshooting.md`, Schnell-Check pro Pipeline-Stufe.
+- Bei „Phase 5 weitermachen" → Trigger-Grund aus dem Abschnitt oben klaeren, passenden Punkt waehlen.
 
-Lokaler Dev-Server laeuft auf `http://127.0.0.1:8765/pwa/` (Python static server).
-Produktiv: https://bnhaupt.github.io/enkephalos-recorder/ (auf `main` pushen deployed automatisch).
+Lokaler Dev-Server: `http://127.0.0.1:8765/pwa/` (Python static server).
+Produktiv: https://bnhaupt.github.io/enkephalos-recorder/ (`main` pushen deployed automatisch).

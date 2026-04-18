@@ -1,4 +1,4 @@
-# Voice Pipeline — Stand 2026-04-18
+# Voice Pipeline — Stand 2026-04-18 (Pixel live)
 
 Kurzer Einstieg, um nach Pause weiterzumachen.
 
@@ -43,10 +43,12 @@ Kurzer Einstieg, um nach Pause weiterzumachen.
 4. **Offline-Queue mit Reconnect + Backoff** — fuer unzuverlaessiges WLAN in der Klinik.
 5. **Update-Prompt bei neuem Service-Worker** — statt Auto-Reload.
 
-### Pixel-Deployment (bisher nur localhost)
-- GitHub-Pages-Repo anlegen, Origin `https://<user>.github.io` zur OAuth-Client-ID hinzufuegen.
-- PWA installieren per „Zum Startbildschirm hinzufuegen".
-- Google-OAuth-Testers: Accounts mit dem Gmail-Login stehen drin.
+### Pixel-Deployment [fertig 2026-04-18]
+- Repo: https://github.com/bnhaupt/enkephalos-recorder (public)
+- GitHub Pages: `main` / `/ (root)`, Live-URL https://bnhaupt.github.io/enkephalos-recorder/
+- Root-`index.html` leitet per Meta-Refresh nach `./pwa/` (Pages erlaubt nur `/` oder `/docs`, kein `/pwa`).
+- OAuth-Origin `https://bnhaupt.github.io` ist im Google-Cloud-Client hinterlegt.
+- Auf dem Pixel installiert und laeuft.
 
 ## Zentrale Datei-Map
 
@@ -80,6 +82,6 @@ Nach Pause an einer dieser Stellen ansetzen:
 
 - **„Drive-Desktop-Sync abschliessen"** (manueller Schritt, ca. 10 Min) — dann ist der End-to-End-Flow bis ins Vault geschlossen.
 - **„Phase 5 #1 Chunk-Upload fuer Meetings >30 Min"** (~200 Zeilen, in `recorder.js` + `gemini.js`) — Qualitaetsschub fuer lange Termine.
-- **„Pixel-Deployment via GitHub Pages"** (~30 Min Setup) — App produktiv aufs Handy bringen.
 
 Lokaler Dev-Server laeuft auf `http://127.0.0.1:8765/pwa/` (Python static server).
+Produktiv: https://bnhaupt.github.io/enkephalos-recorder/ (auf `main` pushen deployed automatisch).

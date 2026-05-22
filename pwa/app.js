@@ -14,6 +14,8 @@ import {
   deleteFile,
   buildIdeaPrompt,
   buildMeetingPrompt,
+  buildMeetingPromptPart1,
+  buildMeetingPromptPart2,
 } from "./gemini.js";
 import {
   hasGis,
@@ -262,6 +264,34 @@ async function getOrAskApiKey() {
   return entered;
 }
 
+const SPLIT_THRESHOLD_SEC = 1800; // 30 Minuten
+
+async function transcribeMeetingInParts(apiKey, rec) {
+  const totalSec = rec.durationSec;
+  const halfSize = Math.floor(rec.audioBlob.size / 2);
+  const halfSec = totalSec / 2;
+  const mime = rec.mimeType || rec.audioBlob.type || "audio/webm";
+  const meta = { isoTimestamp: rec.createdAt, durationSec: halfSec, title: rec.title };
+
+  toast("Meeting wird in zwei Teilen transkribiert \u2026");
+
+  const blob1 = rec.audioBlob.slice(0, halfSize, mime);
+  let file1 = await uploadAudio(apiKey, blob1, `enkephalos-${rec.id}-p1-${Date.now()}`);
+  file1 = await waitForFileActive(apiKey, file1);
+  const md1 = await generateContent(apiKey, GEMINI_MODEL, file1, buildMeetingPromptPart1(meta, totalSec), { meeting: true });
+  await deleteFile(apiKey, file1.name);
+
+  toast("Teil 1 fertig, verarbeite Teil 2 \u2026");
+
+  const blob2 = rec.audioBlob.slice(halfSize, rec.audioBlob.size, mime);
+  let file2 = await uploadAudio(apiKey, blob2, `enkephalos-${rec.id}-p2-${Date.now()}`);
+  file2 = await waitForFileActive(apiKey, file2);
+  const md2 = await generateContent(apiKey, GEMINI_MODEL, file2, buildMeetingPromptPart2({ ...meta, durationSec: totalSec - halfSec }, halfSec, totalSec), { meeting: true });
+  await deleteFile(apiKey, file2.name);
+
+  return md1 + "\n\n---\n\n" + md2;
+}
+
 const activeTranscriptions = new Set();
 
 async function transcribeRecording(id) {
@@ -283,21 +313,25 @@ async function transcribeRecording(id) {
     const rec = await dbGet(STORE_RECORDINGS, id);
     if (!rec) return;
 
-    const displayName = `enkephalos-${rec.kind}-${rec.id}-${Date.now()}`;
-    let file = await uploadAudio(apiKey, rec.audioBlob, displayName);
-    fileName = file.name;
-    file = await waitForFileActive(apiKey, file);
-
     const meta = {
       isoTimestamp: rec.createdAt,
       durationSec: rec.durationSec,
       title: rec.title,
     };
-    const promptText = rec.kind === "idea"
-      ? buildIdeaPrompt(meta)
-      : buildMeetingPrompt(meta);
 
-    const markdown = await generateContent(apiKey, GEMINI_MODEL, file, promptText);
+    let markdown;
+    if (rec.kind === "meeting" && rec.durationSec > SPLIT_THRESHOLD_SEC) {
+      markdown = await transcribeMeetingInParts(apiKey, rec);
+    } else {
+      const displayName = `enkephalos-${rec.kind}-${rec.id}-${Date.now()}`;
+      let file = await uploadAudio(apiKey, rec.audioBlob, displayName);
+      fileName = file.name;
+      file = await waitForFileActive(apiKey, file);
+      const promptText = rec.kind === "idea"
+        ? buildIdeaPrompt(meta)
+        : buildMeetingPrompt(meta);
+      markdown = await generateContent(apiKey, GEMINI_MODEL, file, promptText, { meeting: rec.kind === "meeting" });
+    }
 
     await updateRecordingRecord(id, {
       status: "uploading",

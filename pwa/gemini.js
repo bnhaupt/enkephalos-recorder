@@ -22,6 +22,13 @@ const GENERATION_CONFIG = {
   responseMimeType: "text/plain",
 };
 
+const MEETING_GENERATION_CONFIG = {
+  temperature: 0.2,
+  topP: 0.95,
+  maxOutputTokens: 32768,
+  responseMimeType: "text/plain",
+};
+
 async function readErr(res) {
   try {
     const txt = await res.text();
@@ -105,7 +112,7 @@ export async function deleteFile(apiKey, fileName) {
   }
 }
 
-export async function generateContent(apiKey, model, file, promptText) {
+export async function generateContent(apiKey, model, file, promptText, { meeting = false } = {}) {
   const url =
     `${BASE}/v1beta/models/${encodeURIComponent(model)}:generateContent` +
     `?key=${encodeURIComponent(apiKey)}`;
@@ -118,7 +125,7 @@ export async function generateContent(apiKey, model, file, promptText) {
         ],
       },
     ],
-    generationConfig: GENERATION_CONFIG,
+    generationConfig: meeting ? MEETING_GENERATION_CONFIG : GENERATION_CONFIG,
     safetySettings: SAFETY_SETTINGS,
   };
   const res = await fetch(url, {
@@ -243,4 +250,69 @@ transcription_model: gemini-2.5-flash
 <Vollstaendiges Transkript mit Sprecherzuordnung>
 
 Gib ausschliesslich das Markdown zurueck.`;
+}
+
+export function buildMeetingPromptPart1(meta, totalDurationSec) {
+  const partMin = Math.round(meta.durationSec / 60);
+  const totalMin = Math.round(totalDurationSec / 60);
+  const title = meta.title || fmtDe(meta.isoTimestamp);
+  const secs = Math.round(meta.durationSec);
+  return `Du bekommst den ERSTEN TEIL (Minute 0 bis ca. ${partMin}) einer deutschsprachigen Meeting-Aufnahme von insgesamt ca. ${totalMin} Minuten. Teilnehmer sind typischerweise Aerzte, Therapeuten, Pflegekraefte, oder administratives Personal einer neurologischen Klinik.
+
+Metadaten:
+${buildMetaBlock({ ...meta, durationSec: totalDurationSec })}
+
+Deine Aufgabe:
+1. Transkribiere mit Sprecher-Unterscheidung (Sprecher 1, Sprecher 2 etc.), wenn akustisch trennbar. Medizinische Fachbegriffe korrekt.
+2. Erstelle ein strukturiertes Markdown:
+
+---
+type: voice-capture
+kind: meeting
+captured: ${meta.isoTimestamp}
+duration_sec: ${Math.round(totalDurationSec)}
+title: ${title}
+transcription_model: gemini-2.5-flash
+---
+
+# Meeting: ${title}
+
+## Kurzueberblick (Teil 1, Minute 0-${partMin})
+<2-4 Saetze Kernthema und wichtigste Ergebnisse aus diesem ersten Teil>
+
+## Teilnehmer (soweit erkennbar)
+- Sprecher 1: <falls benannt>
+- Sprecher 2: ...
+
+## Entscheidungen (Teil 1)
+- <Jede Entscheidung als Bullet>
+
+## Offene Punkte / Todos (Teil 1)
+- [ ] <Wer? Was? Bis wann?>
+
+## Transkript (Teil 1 — Minute 0 bis ca. ${partMin})
+<Vollstaendiges Transkript mit Sprecherzuordnung>
+
+Gib ausschliesslich das Markdown zurueck.`;
+}
+
+export function buildMeetingPromptPart2(meta, startSec, totalDurationSec) {
+  const startMin = Math.round(startSec / 60);
+  const endMin = Math.round(totalDurationSec / 60);
+  return `Du bekommst den ZWEITEN TEIL (Minute ca. ${startMin} bis ${endMin}) einer deutschsprachigen Meeting-Aufnahme. Teilnehmer sind typischerweise Aerzte, Therapeuten, Pflegekraefte, oder administratives Personal einer neurologischen Klinik.
+
+Transkribiere mit Sprecher-Unterscheidung, wenn akustisch trennbar. Medizinische Fachbegriffe korrekt.
+
+Gib NUR folgendes Markdown zurueck (keine Frontmatter, keine Wiederholung des Titels):
+
+## Entscheidungen (Teil 2)
+- <Jede Entscheidung als Bullet, oder: "Keine weiteren Entscheidungen">
+
+## Offene Punkte / Todos (Teil 2)
+- [ ] <Wer? Was? Bis wann?>
+
+## Transkript (Teil 2 — Minute ca. ${startMin} bis ${endMin})
+<Vollstaendiges Transkript mit Sprecherzuordnung>
+
+Gib ausschliesslich dieses Markdown zurueck.`;
 }

@@ -908,6 +908,19 @@ document.addEventListener("keydown", (ev) => {
   if (modal && !modal.hidden) closeMarkdownModal();
 });
 
+// ---------- Drive-Config-Reset via ?reset-drive ----------
+
+async function maybeResetDrive() {
+  if (!new URLSearchParams(location.search).has("reset-drive")) return;
+  try {
+    await openDb();
+    await dbDelete(STORE_CONFIG, CONFIG_KEY_DRIVE_CLIENT_ID);
+    await dbDelete(STORE_CONFIG, CONFIG_KEY_DRIVE_TOKEN);
+    await dbDelete(STORE_CONFIG, CONFIG_KEY_DRIVE_FOLDER_ID);
+  } catch {}
+  history.replaceState(null, "", location.pathname + location.hash);
+}
+
 // ---------- Init ----------
 
 async function init() {
@@ -916,6 +929,7 @@ async function init() {
   } catch (err) {
     console.error("IndexedDB-Init fehlgeschlagen:", err);
   }
+  await maybeResetDrive();
   bindButtons();
   window.addEventListener("hashchange", onHashChange);
   await updateDriveBanner();

@@ -946,6 +946,10 @@ document.addEventListener("keydown", (ev) => {
 
 async function maybeResetDrive() {
   if (!new URLSearchParams(location.search).has("reset-drive")) return;
+  if (!window.confirm("Drive-Konfiguration (Client-ID, Token, Ordner) wirklich loeschen?")) {
+    history.replaceState(null, "", location.pathname + location.hash);
+    return;
+  }
   try {
     await openDb();
     await dbDelete(STORE_CONFIG, CONFIG_KEY_DRIVE_CLIENT_ID);
@@ -957,12 +961,31 @@ async function maybeResetDrive() {
 
 // ---------- Init ----------
 
+// Persistenten Speicher anfordern, sonst darf Chrome die IndexedDB
+// (Keys, Aufnahmen) bei Speicherdruck komplett raeumen. Bei installierten
+// PWAs gewaehrt Chrome das ohne Dialog.
+async function requestPersistentStorage() {
+  try {
+    if (!navigator.storage || !navigator.storage.persist) return;
+    const already = await navigator.storage.persisted();
+    if (already) return;
+    const granted = await navigator.storage.persist();
+    console.log("Persistent Storage:", granted ? "gewaehrt" : "abgelehnt");
+    if (!granted) {
+      toast("Achtung: Speicher nicht persistent, Keys koennen verloren gehen", { isError: true });
+    }
+  } catch (err) {
+    console.debug("Persistent-Storage-Anfrage fehlgeschlagen:", err);
+  }
+}
+
 async function init() {
   try {
     await openDb();
   } catch (err) {
     console.error("IndexedDB-Init fehlgeschlagen:", err);
   }
+  await requestPersistentStorage();
   await maybeResetDrive();
   bindButtons();
   window.addEventListener("hashchange", onHashChange);

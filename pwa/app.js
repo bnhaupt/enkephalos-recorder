@@ -363,24 +363,11 @@ async function transcribeRecording(id) {
 
 // ---------- Drive: OAuth + Upload ----------
 
-async function getStoredDriveClientId() {
-  const entry = await dbGet(STORE_CONFIG, CONFIG_KEY_DRIVE_CLIENT_ID);
-  return entry && entry.value ? entry.value : null;
-}
-
-async function askForDriveClientId() {
-  const entered = (window.prompt(
-    "Google-OAuth-Client-ID (Format: 123...-abc.apps.googleusercontent.com):",
-    "",
-  ) || "").trim();
-  if (!entered) return null;
-  if (!/\.apps\.googleusercontent\.com$/.test(entered)) {
-    toast("Client-ID sollte auf .apps.googleusercontent.com enden", { isError: true });
-    return null;
-  }
-  await dbPut(STORE_CONFIG, { key: CONFIG_KEY_DRIVE_CLIENT_ID, value: entered });
-  return entered;
-}
+// Fest eingebaut statt manueller Eingabe: OAuth-Web-Client-IDs sind public
+// by design (stehen ohnehin im ausgelieferten JS); die Absicherung laeuft
+// ueber die Authorized JavaScript Origins in der Cloud Console.
+const DRIVE_CLIENT_ID =
+  "127995864370-2bh8qaq3k30hadhkolm9covefqcg7vsr.apps.googleusercontent.com";
 
 async function getStoredDriveToken() {
   const entry = await dbGet(STORE_CONFIG, CONFIG_KEY_DRIVE_TOKEN);
@@ -392,14 +379,12 @@ async function getValidDriveToken() {
   return isTokenValid(tok) ? tok.access_token : null;
 }
 
-async function ensureDriveTokenClient() {
-  const clientId = await getStoredDriveClientId();
-  if (!clientId) return null;
+function ensureDriveTokenClient() {
   if (!hasGis()) {
     toast("Google-Login noch nicht geladen", { isError: true });
     return null;
   }
-  initTokenClient(clientId, {
+  initTokenClient(DRIVE_CLIENT_ID, {
     onToken: async (token) => {
       await dbPut(STORE_CONFIG, { key: CONFIG_KEY_DRIVE_TOKEN, value: token });
       await updateDriveBanner();
@@ -413,40 +398,28 @@ async function ensureDriveTokenClient() {
       toast("Drive-Autorisierung abgebrochen", { isError: true });
     },
   });
-  return clientId;
+  return DRIVE_CLIENT_ID;
 }
 
 // Synchroner Handler fuer den Verbinden-Button. KEINE awaits vor
 // requestAccessToken, sonst verbraucht das Popup-Blockerverhalten die
 // User-Gesture.
 function onDriveButtonClick() {
-  if (isTokenClientReady()) {
-    try {
-      requestAccessToken({ silent: false });
-    } catch (err) {
-      console.error(err);
-      toast("Drive-Autorisierung fehlgeschlagen", { isError: true });
+  if (!isTokenClientReady()) {
+    // GIS-Script war beim Init noch nicht geladen — jetzt nachholen.
+    // Der Token-Client ist danach bereit, aber die User-Gesture ist
+    // verbraucht; der Nutzer tippt einfach nochmal.
+    if (ensureDriveTokenClient()) {
+      toast("Bereit. Nochmal auf Verbinden tippen.");
     }
     return;
   }
-  // Erster Start: Client-ID setup. Das oeffnet KEIN GIS-Popup,
-  // sondern bereitet nur den Token-Client vor. Der Nutzer muss danach
-  // noch einmal auf Verbinden tippen.
-  setupDriveClientIdThenPrepare().catch((err) => {
+  try {
+    requestAccessToken({ silent: false });
+  } catch (err) {
     console.error(err);
-    toast("Drive-Setup fehlgeschlagen", { isError: true });
-  });
-}
-
-async function setupDriveClientIdThenPrepare() {
-  let clientId = await getStoredDriveClientId();
-  if (!clientId) {
-    clientId = await askForDriveClientId();
-    if (!clientId) return;
+    toast("Drive-Autorisierung fehlgeschlagen", { isError: true });
   }
-  await ensureDriveTokenClient();
-  await updateDriveBanner();
-  toast("Client-ID gespeichert. Erneut auf Verbinden tippen.");
 }
 
 async function updateDriveBanner() {
@@ -455,15 +428,8 @@ async function updateDriveBanner() {
   const btn = document.getElementById("drive-connect-btn");
   if (!banner || !textEl || !btn) return;
 
-  const clientId = await getStoredDriveClientId();
   const token = await getStoredDriveToken();
 
-  if (!clientId) {
-    textEl.textContent = "Google-Drive-Client-ID einrichten.";
-    btn.textContent = "Einrichten";
-    banner.hidden = false;
-    return;
-  }
   if (!isTokenValid(token)) {
     textEl.textContent = "Google Drive verbinden.";
     btn.textContent = "Verbinden";
@@ -991,10 +957,11 @@ async function init() {
   window.addEventListener("hashchange", onHashChange);
   await updateDriveBanner();
 
-  // Token-Client vorbereiten, wenn Client-ID schon konfiguriert ist.
-  // (requestAccessToken wird erst bei User-Gesture aufgerufen.)
+  // Token-Client vorbereiten. (requestAccessToken wird erst bei
+  // User-Gesture aufgerufen.) Falls das GIS-Script noch laedt, holt
+  // onDriveButtonClick die Initialisierung nach.
   try {
-    if (await getStoredDriveClientId()) await ensureDriveTokenClient();
+    if (hasGis()) ensureDriveTokenClient();
   } catch (err) {
     console.debug("Drive-Token-Client-Init:", err);
   }

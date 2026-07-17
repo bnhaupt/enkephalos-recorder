@@ -11,6 +11,7 @@ import {
   uploadAudio,
   waitForFileActive,
   generateContent,
+  generateContentInline,
   deleteFile,
   validateApiKey,
   buildIdeaPrompt,
@@ -278,6 +279,8 @@ async function getOrAskApiKey() {
 }
 
 const SPLIT_THRESHOLD_SEC = 1800; // 30 Minuten
+// inline_data-Limit: 20MB pro Request inkl. Base64-Overhead (+33%).
+const INLINE_MAX_BYTES = 14 * 1024 * 1024;
 
 async function transcribeMeetingInParts(apiKey, rec) {
   const totalSec = rec.durationSec;
@@ -286,21 +289,24 @@ async function transcribeMeetingInParts(apiKey, rec) {
   const mime = rec.mimeType || rec.audioBlob.type || "audio/webm";
   const meta = { isoTimestamp: rec.createdAt, durationSec: halfSec, title: rec.title };
 
-  toast("Meeting wird in zwei Teilen transkribiert \u2026");
+  toast("Meeting wird in zwei Teilen parallel transkribiert \u2026");
+
+  const runPart = async (blob, label, promptText) => {
+    let file = await uploadAudio(apiKey, blob, label);
+    try {
+      file = await waitForFileActive(apiKey, file);
+      return await generateContent(apiKey, GEMINI_MODEL, file, promptText, { meeting: true });
+    } finally {
+      deleteFile(apiKey, file.name).catch(() => {});
+    }
+  };
 
   const blob1 = rec.audioBlob.slice(0, halfSize, mime);
-  let file1 = await uploadAudio(apiKey, blob1, `enkephalos-${rec.id}-p1-${Date.now()}`);
-  file1 = await waitForFileActive(apiKey, file1);
-  const md1 = await generateContent(apiKey, GEMINI_MODEL, file1, buildMeetingPromptPart1(meta, totalSec), { meeting: true });
-  await deleteFile(apiKey, file1.name);
-
-  toast("Teil 1 fertig, verarbeite Teil 2 \u2026");
-
   const blob2 = rec.audioBlob.slice(halfSize, rec.audioBlob.size, mime);
-  let file2 = await uploadAudio(apiKey, blob2, `enkephalos-${rec.id}-p2-${Date.now()}`);
-  file2 = await waitForFileActive(apiKey, file2);
-  const md2 = await generateContent(apiKey, GEMINI_MODEL, file2, buildMeetingPromptPart2({ ...meta, durationSec: totalSec - halfSec }, halfSec, totalSec), { meeting: true });
-  await deleteFile(apiKey, file2.name);
+  const [md1, md2] = await Promise.all([
+    runPart(blob1, `enkephalos-${rec.id}-p1-${Date.now()}`, buildMeetingPromptPart1(meta, totalSec)),
+    runPart(blob2, `enkephalos-${rec.id}-p2-${Date.now()}`, buildMeetingPromptPart2({ ...meta, durationSec: totalSec - halfSec }, halfSec, totalSec)),
+  ]);
 
   return md1 + "\n\n---\n\n" + md2;
 }
@@ -325,6 +331,13 @@ async function transcribeRecording(id) {
 
     const rec = await dbGet(STORE_RECORDINGS, id);
     if (!rec) return;
+    if (!rec.audioBlob) {
+      await updateRecordingRecord(id, {
+        status: "error",
+        errorMessage: "Audio-Rohdaten bereits geloescht (Aufnahme war schon hochgeladen)",
+      });
+      return;
+    }
 
     const meta = {
       isoTimestamp: rec.createdAt,
@@ -335,6 +348,9 @@ async function transcribeRecording(id) {
     let markdown;
     if (rec.kind === "meeting" && rec.durationSec > SPLIT_THRESHOLD_SEC) {
       markdown = await transcribeMeetingInParts(apiKey, rec);
+    } else if (rec.kind === "idea" && rec.audioBlob.size <= INLINE_MAX_BYTES) {
+      // Kurze Aufnahmen inline: ein Request statt Upload + Poll + Delete.
+      markdown = await generateContentInline(apiKey, GEMINI_MODEL, rec.audioBlob, buildIdeaPrompt(meta), { meeting: false });
     } else {
       const displayName = `enkephalos-${rec.kind}-${rec.id}-${Date.now()}`;
       let file = await uploadAudio(apiKey, rec.audioBlob, displayName);
@@ -501,6 +517,10 @@ async function uploadRecordingToDrive(id) {
       driveWebViewLink: uploaded.webViewLink || null,
       uploadedAt: new Date().toISOString(),
       errorMessage: null,
+      // Rohaudio nach erfolgreichem Upload verwerfen — sonst waechst die
+      // IndexedDB unbegrenzt (30-60 Min Meeting = zweistellige MB) und
+      // erhoeht den Eviction-Druck. Das Markdown bleibt erhalten.
+      audioBlob: null,
     });
     toast("In Drive hochgeladen");
   } catch (err) {
@@ -519,6 +539,17 @@ async function uploadRecordingToDrive(id) {
   } finally {
     activeUploads.delete(id);
     await renderHistory();
+  }
+}
+
+// Einmalige Bereinigung von Altbestand: Blobs bereits hochgeladener
+// Aufnahmen freigeben.
+async function cleanupUploadedBlobs() {
+  const all = await dbGetAll(STORE_RECORDINGS);
+  for (const rec of all) {
+    if (rec.driveFileId && rec.audioBlob) {
+      await updateRecordingRecord(rec.id, { audioBlob: null });
+    }
   }
 }
 
@@ -988,6 +1019,9 @@ async function init() {
   await requestPersistentStorage();
   await maybeResetDrive();
   await maybeResetGemini();
+  cleanupUploadedBlobs().catch((err) =>
+    console.debug("Blob-Cleanup fehlgeschlagen:", err),
+  );
   bindButtons();
   window.addEventListener("hashchange", onHashChange);
   await updateDriveBanner();

@@ -45,7 +45,15 @@ Kurzer Einstieg, um nach Pause weiterzumachen.
 - **2026-05-22:** `?reset-drive`-URL-Parameter loescht Drive-Config aus IndexedDB (seit 2026-07-17 mit `confirm()`-Rueckfrage).
 - **2026-07-17:** Storage-Eviction-Fix nach zweimaligem Key-Verlust: `navigator.storage.persist()` beim Init (`requestPersistentStorage()` in `app.js`). Ursache war Chrome-Origin-Eviction — IndexedDB galt ohne persist() als „best effort".
 - **2026-07-17:** Drive-Client-ID hardcoded (siehe Phase 4).
-- **2026-07-17:** Gemini-Key wird bei Eingabe live gegen die API validiert (`validateApiKey` in `gemini.js`), Whitespace wird entfernt; bei `API_KEY_INVALID`-Fehlern wird der gespeicherte Key automatisch verworfen (analog 401-Handling beim Drive-Token). Neuer Reset-Pfad `?reset-gemini`. SW-Cache v12. End-to-End verifiziert.
+- **2026-07-17:** Gemini-Key wird bei Eingabe live gegen die API validiert (`validateApiKey` in `gemini.js`), Whitespace wird entfernt; bei `API_KEY_INVALID`-Fehlern wird der gespeicherte Key automatisch verworfen (analog 401-Handling beim Drive-Token). Neuer Reset-Pfad `?reset-gemini`. End-to-End verifiziert.
+- **2026-07-17 (Paket A — Qualitaet/Speed):**
+  - Prompts gehaertet: verbindlicher Anti-Halluzinations-Regelblock (`PROMPT_RULES`/`MEETING_RULES` in `gemini.js`) — nichts erfinden, [unverstaendlich]-Marker, "Keine." statt Ausfuellzwang bei Entscheidungen/Todos, Sprecherlabels nur bei klarer Trennung, nuechterner Telegrammstil. `temperature` 0, `thinkingBudget` 0 (Flash denkt sonst per Default vor — Latenz ohne Nutzen).
+  - Ideen laufen inline (`generateContentInline`, Base64 im generateContent-Call) statt ueber Files API — 1 Request statt 3 + Polling.
+  - Auto-Split-Teile laufen parallel (Promise.all) statt sequenziell.
+  - Aufnahme: 32 kbps Opus mono (`audioBitsPerSecond` in `recorder.js`) — Uploads ~4x kleiner.
+  - Audio-Blobs werden nach erfolgreichem Drive-Upload aus IndexedDB entfernt (plus Startup-Cleanup fuer Altbestand) — vorher wuchs die DB unbegrenzt und erhoehte den Eviction-Druck.
+  - SW-Cache v13.
+  - Bekannte Restpunkte (Paket B, bei Bedarf): sauberer 30-Min-Split per Recorder-Neustart statt Blob-slice (zweite Haelfte hat keinen WebM-Header — funktioniert, ist aber fragil), Chunk-Recovery, Silent-Token-Refresh, OAuth-Consent auf Production.
 
 ### Phase 5 — Polish [bewusst zurueckgestellt am 2026-04-18]
 

@@ -45,11 +45,15 @@ export async function startRecording(opts) {
       echoCancellation: true,
       noiseSuppression: true,
       autoGainControl: true,
+      channelCount: 1,
     },
   });
 
   const mimeType = pickMimeType();
-  const recorderOpts = mimeType ? { mimeType } : undefined;
+  // 32 kbps Opus mono ist fuer Sprache transparent und macht Uploads
+  // ~4x kleiner als der Chrome-Default.
+  const recorderOpts = { audioBitsPerSecond: 32000 };
+  if (mimeType) recorderOpts.mimeType = mimeType;
   const recorder = new MediaRecorder(stream, recorderOpts);
 
   const chunks = [];

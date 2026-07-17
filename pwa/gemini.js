@@ -15,18 +15,22 @@ const SAFETY_SETTINGS = [
   { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
 ];
 
+// temperature 0 + thinkingBudget 0: Transkription braucht weder Kreativitaet
+// noch Vorab-Reasoning; beides kostet nur Latenz bzw. erhoeht Halluzinationsrisiko.
 const GENERATION_CONFIG = {
-  temperature: 0.2,
+  temperature: 0,
   topP: 0.95,
   maxOutputTokens: 8192,
   responseMimeType: "text/plain",
+  thinkingConfig: { thinkingBudget: 0 },
 };
 
 const MEETING_GENERATION_CONFIG = {
-  temperature: 0.2,
+  temperature: 0,
   topP: 0.95,
   maxOutputTokens: 32768,
   responseMimeType: "text/plain",
+  thinkingConfig: { thinkingBudget: 0 },
 };
 
 async function readErr(res) {
@@ -121,19 +125,12 @@ export async function deleteFile(apiKey, fileName) {
   }
 }
 
-export async function generateContent(apiKey, model, file, promptText, { meeting = false } = {}) {
+async function callGenerate(apiKey, model, parts, meeting) {
   const url =
     `${BASE}/v1beta/models/${encodeURIComponent(model)}:generateContent` +
     `?key=${encodeURIComponent(apiKey)}`;
   const body = {
-    contents: [
-      {
-        parts: [
-          { file_data: { file_uri: file.uri, mime_type: file.mimeType } },
-          { text: promptText },
-        ],
-      },
-    ],
+    contents: [{ parts }],
     generationConfig: meeting ? MEETING_GENERATION_CONFIG : GENERATION_CONFIG,
     safetySettings: SAFETY_SETTINGS,
   };
@@ -154,10 +151,36 @@ export async function generateContent(apiKey, model, file, promptText, { meeting
   if (candidate.finishReason === "SAFETY") {
     throw new Error("Gemini-Safety-Filter hat blockiert");
   }
-  const parts = candidate.content?.parts || [];
-  const text = parts.map((p) => p.text || "").join("");
+  const respParts = candidate.content?.parts || [];
+  const text = respParts.map((p) => p.text || "").join("");
   if (!text.trim()) throw new Error("Leere Transkript-Antwort");
   return text;
+}
+
+export async function generateContent(apiKey, model, file, promptText, { meeting = false } = {}) {
+  return callGenerate(apiKey, model, [
+    { file_data: { file_uri: file.uri, mime_type: file.mimeType } },
+    { text: promptText },
+  ], meeting);
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(reader.error || new Error("Blob-Encoding fehlgeschlagen"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Fuer kurze Aufnahmen: Audio als inline_data direkt im generateContent-Call.
+// Spart Files-API-Upload, ACTIVE-Polling und Delete (3 Requests + Warteschleife).
+export async function generateContentInline(apiKey, model, blob, promptText, { meeting = false } = {}) {
+  const data = await blobToBase64(blob);
+  return callGenerate(apiKey, model, [
+    { inline_data: { mime_type: blob.type || "audio/webm", data } },
+    { text: promptText },
+  ], meeting);
 }
 
 // ---------- Prompts ----------
@@ -176,6 +199,18 @@ function fmtDe(iso) {
   }
 }
 
+// Verbindlicher Regelblock gegen Halluzination und Fuellprosa — in jedem Prompt.
+const PROMPT_RULES = `Regeln (verbindlich):
+- Transkribiere ausschliesslich, was tatsaechlich gesagt wurde. Erfinde nichts, ergaenze nichts, interpretiere nichts hinein.
+- Unverstaendliche Stellen als [unverstaendlich] markieren, unsichere Woerter als [? wort].
+- Wenn das Audio leer, stumm oder durchgehend unverstaendlich ist: schreibe genau das ins Transkript. Rekonstruiere keinen Inhalt aus Vermutungen oder Kontext.
+- Medizinische Fachbegriffe exakt so wiedergeben, wie sie gesprochen wurden; bei Unsicherheit [? begriff].
+- Stil aller Zusammenfassungen: nuechtern, telegrammartig, streng am Gesagten. Keine Bewertungen, keine Fuellwoerter, kein Management-Jargon.`;
+
+const MEETING_RULES = `${PROMPT_RULES}
+- Entscheidungen und Todos: NUR was woertlich als Entscheidung oder Auftrag ausgesprochen wurde. Wenn keine vorhanden: "Keine." Nichts aus dem Gespraechsverlauf ableiten.
+- Sprecherlabels (Sprecher 1, Sprecher 2, ...) nur bei eindeutiger akustischer Trennung, sonst Transkript ohne Labels. Namen nur verwenden, wenn sie im Gespraech genannt werden.`;
+
 function buildMetaBlock({ isoTimestamp, durationSec, title }) {
   const lines = [
     `- ISO-Zeitstempel: ${isoTimestamp}`,
@@ -188,14 +223,14 @@ function buildMetaBlock({ isoTimestamp, durationSec, title }) {
 export function buildIdeaPrompt(meta) {
   const secs = Math.round(meta.durationSec);
   const human = fmtDe(meta.isoTimestamp);
-  return `Du bekommst eine kurze deutschsprachige Sprachnotiz (meist unter 2 Minuten). Der Sprecher ist Klinikdirektor, Neurologe und Geriater. Der Inhalt ist typischerweise eine fluechtige Idee, ein Gedanke, eine Erinnerung, eine To-do-Notiz oder eine Beobachtung.
+  return `Du bekommst eine kurze deutschsprachige Sprachnotiz (meist unter 2 Minuten) eines Klinikdirektors (Neurologie/Geriatrie). Typischer Inhalt: fluechtige Idee, Gedanke, To-do, Beobachtung.
+
+${PROMPT_RULES}
 
 Metadaten:
 ${buildMetaBlock(meta)}
 
-Deine Aufgabe:
-1. Transkribiere woertlich. Medizinische Fachbegriffe korrekt setzen.
-2. Erstelle ein strukturiertes Markdown mit folgendem Aufbau:
+Gib exakt folgendes Markdown zurueck, nichts davor, nichts danach:
 
 ---
 type: voice-capture
@@ -208,28 +243,26 @@ transcription_model: gemini-2.5-flash
 # Idee ${human}
 
 ## Transkript
-<Woertliches Transkript>
+<woertliches Transkript nach obigen Regeln>
 
 ## Worum geht es
-<Ein Satz, maximal zwei>
+<Ein nuechterner Satz, streng aus dem Gesagten. Wenn nicht ableitbar: "Unklar.">
 
 ## Moegliche Verortung im Vault
-<Vorschlag: wiki/entities/..., projects/..., areas/..., nur wenn aus dem Inhalt ableitbar. Sonst: "Unklar, beim Ingest entscheiden".>
-
-Gib ausschliesslich das Markdown zurueck, keine Umschweife.`;
+<wiki/entities/..., projects/... oder areas/... NUR wenn der Inhalt es eindeutig hergibt. Sonst exakt: "Unklar, beim Ingest entscheiden.">`;
 }
 
 export function buildMeetingPrompt(meta) {
   const secs = Math.round(meta.durationSec);
   const title = meta.title || fmtDe(meta.isoTimestamp);
-  return `Du bekommst eine deutschsprachige Meeting-Aufnahme (bis 60 Min). Teilnehmer sind typischerweise Aerzte, Therapeuten, Pflegekraefte, oder administratives Personal einer neurologischen Klinik.
+  return `Du bekommst eine deutschsprachige Meeting-Aufnahme (bis 60 Min) aus einer neurologischen Klinik. Teilnehmer: Aerzte, Therapeuten, Pflegekraefte oder Verwaltung.
+
+${MEETING_RULES}
 
 Metadaten:
 ${buildMetaBlock(meta)}
 
-Deine Aufgabe:
-1. Transkribiere mit Sprecher-Unterscheidung (Sprecher 1, Sprecher 2 etc.), wenn akustisch trennbar. Sonst durchgehend. Medizinische Fachbegriffe korrekt.
-2. Erstelle ein strukturiertes Markdown:
+Gib exakt folgendes Markdown zurueck, nichts davor, nichts danach:
 
 ---
 type: voice-capture
@@ -243,22 +276,19 @@ transcription_model: gemini-2.5-flash
 # Meeting: ${title}
 
 ## Kurzueberblick
-<2-4 Saetze Kernthema und wichtigste Ergebnisse>
+<2-4 telegrammartige Saetze: Kernthema, Ergebnisse. Nur belegbare Aussagen.>
 
 ## Teilnehmer (soweit erkennbar)
-- Sprecher 1: <falls benannt im Gespraech>
-- Sprecher 2: ...
+<Nur im Gespraech genannte Namen/Rollen. Sonst exakt: "Nicht erkennbar.">
 
 ## Entscheidungen
-- <Jede getroffene Entscheidung als Bullet>
+<Nur woertlich ausgesprochene Entscheidungen als Bullets. Sonst: "Keine.">
 
 ## Offene Punkte / Todos
-- [ ] <Wer?> <Was?> <Bis wann, falls genannt?>
+<Nur woertlich ausgesprochene Auftraege als "- [ ] Wer? Was? Bis wann?". Sonst: "Keine.">
 
 ## Transkript
-<Vollstaendiges Transkript mit Sprecherzuordnung>
-
-Gib ausschliesslich das Markdown zurueck.`;
+<vollstaendiges Transkript nach obigen Regeln>`;
 }
 
 export function buildMeetingPromptPart1(meta, totalDurationSec) {
@@ -266,14 +296,15 @@ export function buildMeetingPromptPart1(meta, totalDurationSec) {
   const totalMin = Math.round(totalDurationSec / 60);
   const title = meta.title || fmtDe(meta.isoTimestamp);
   const secs = Math.round(meta.durationSec);
-  return `Du bekommst den ERSTEN TEIL (Minute 0 bis ca. ${partMin}) einer deutschsprachigen Meeting-Aufnahme von insgesamt ca. ${totalMin} Minuten. Teilnehmer sind typischerweise Aerzte, Therapeuten, Pflegekraefte, oder administratives Personal einer neurologischen Klinik.
+  return `Du bekommst den ERSTEN TEIL (Minute 0 bis ca. ${partMin}) einer deutschsprachigen Meeting-Aufnahme von insgesamt ca. ${totalMin} Minuten aus einer neurologischen Klinik. Teilnehmer: Aerzte, Therapeuten, Pflegekraefte oder Verwaltung.
+
+${MEETING_RULES}
+- Der Teil kann mitten im Satz enden; transkribiere bis zum Abbruch und markiere das Ende mit [Schnitt].
 
 Metadaten:
 ${buildMetaBlock({ ...meta, durationSec: totalDurationSec })}
 
-Deine Aufgabe:
-1. Transkribiere mit Sprecher-Unterscheidung (Sprecher 1, Sprecher 2 etc.), wenn akustisch trennbar. Medizinische Fachbegriffe korrekt.
-2. Erstelle ein strukturiertes Markdown:
+Gib exakt folgendes Markdown zurueck, nichts davor, nichts danach:
 
 ---
 type: voice-capture
@@ -287,41 +318,37 @@ transcription_model: gemini-2.5-flash
 # Meeting: ${title}
 
 ## Kurzueberblick (Teil 1, Minute 0-${partMin})
-<2-4 Saetze Kernthema und wichtigste Ergebnisse aus diesem ersten Teil>
+<2-4 telegrammartige Saetze. Nur belegbare Aussagen aus diesem Teil.>
 
 ## Teilnehmer (soweit erkennbar)
-- Sprecher 1: <falls benannt>
-- Sprecher 2: ...
+<Nur im Gespraech genannte Namen/Rollen. Sonst exakt: "Nicht erkennbar.">
 
 ## Entscheidungen (Teil 1)
-- <Jede Entscheidung als Bullet>
+<Nur woertlich ausgesprochene Entscheidungen als Bullets. Sonst: "Keine.">
 
 ## Offene Punkte / Todos (Teil 1)
-- [ ] <Wer? Was? Bis wann?>
+<Nur woertlich ausgesprochene Auftraege als "- [ ] Wer? Was? Bis wann?". Sonst: "Keine.">
 
 ## Transkript (Teil 1 — Minute 0 bis ca. ${partMin})
-<Vollstaendiges Transkript mit Sprecherzuordnung>
-
-Gib ausschliesslich das Markdown zurueck.`;
+<vollstaendiges Transkript nach obigen Regeln>`;
 }
 
 export function buildMeetingPromptPart2(meta, startSec, totalDurationSec) {
   const startMin = Math.round(startSec / 60);
   const endMin = Math.round(totalDurationSec / 60);
-  return `Du bekommst den ZWEITEN TEIL (Minute ca. ${startMin} bis ${endMin}) einer deutschsprachigen Meeting-Aufnahme. Teilnehmer sind typischerweise Aerzte, Therapeuten, Pflegekraefte, oder administratives Personal einer neurologischen Klinik.
+  return `Du bekommst den ZWEITEN TEIL (Minute ca. ${startMin} bis ${endMin}) einer deutschsprachigen Meeting-Aufnahme aus einer neurologischen Klinik. Teilnehmer: Aerzte, Therapeuten, Pflegekraefte oder Verwaltung.
 
-Transkribiere mit Sprecher-Unterscheidung, wenn akustisch trennbar. Medizinische Fachbegriffe korrekt.
+${MEETING_RULES}
+- Der Teil kann mitten im Satz beginnen; transkribiere ab dem ersten verstaendlichen Wort und markiere den Anfang mit [Schnitt].
 
-Gib NUR folgendes Markdown zurueck (keine Frontmatter, keine Wiederholung des Titels):
+Gib exakt folgendes Markdown zurueck (keine Frontmatter, keine Wiederholung des Titels), nichts davor, nichts danach:
 
 ## Entscheidungen (Teil 2)
-- <Jede Entscheidung als Bullet, oder: "Keine weiteren Entscheidungen">
+<Nur woertlich ausgesprochene Entscheidungen als Bullets. Sonst: "Keine.">
 
 ## Offene Punkte / Todos (Teil 2)
-- [ ] <Wer? Was? Bis wann?>
+<Nur woertlich ausgesprochene Auftraege als "- [ ] Wer? Was? Bis wann?". Sonst: "Keine.">
 
 ## Transkript (Teil 2 — Minute ca. ${startMin} bis ${endMin})
-<Vollstaendiges Transkript mit Sprecherzuordnung>
-
-Gib ausschliesslich dieses Markdown zurueck.`;
+<vollstaendiges Transkript nach obigen Regeln>`;
 }

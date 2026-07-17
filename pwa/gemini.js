@@ -38,6 +38,15 @@ async function readErr(res) {
   }
 }
 
+// Billiger Live-Check, ob ein API-Key von Google akzeptiert wird.
+// Wirft bei Netzfehler; gibt false bei abgelehntem Key zurueck.
+export async function validateApiKey(apiKey) {
+  const res = await fetch(
+    `${BASE}/v1beta/models?pageSize=1&key=${encodeURIComponent(apiKey)}`,
+  );
+  return res.ok;
+}
+
 export async function uploadAudio(apiKey, blob, displayName) {
   const mime = blob.type || "audio/webm";
 

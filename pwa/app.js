@@ -12,6 +12,7 @@ import {
   waitForFileActive,
   generateContent,
   deleteFile,
+  validateApiKey,
   buildIdeaPrompt,
   buildMeetingPrompt,
   buildMeetingPromptPart1,
@@ -255,11 +256,23 @@ function toast(msg, { isError = false, durationMs = 3200 } = {}) {
 async function getOrAskApiKey() {
   const stored = await dbGet(STORE_CONFIG, CONFIG_KEY_GEMINI);
   if (stored && stored.value) return stored.value;
+  // Whitespace komplett entfernen — Zeilenumbrueche aus Copy-Paste
+  // (Mail, Messenger) sind sonst unsichtbare Fehlerquellen.
   const entered = (window.prompt(
     "Gemini API-Key (einmalig; bleibt lokal in IndexedDB dieses Geraets):",
     "",
-  ) || "").trim();
+  ) || "").replace(/\s+/g, "");
   if (!entered) return null;
+  try {
+    toast("Pruefe API-Key …");
+    const ok = await validateApiKey(entered);
+    if (!ok) {
+      toast("API-Key von Google abgelehnt — nicht gespeichert. Eingabe pruefen (Copy-Paste statt Abtippen).", { isError: true, durationMs: 6000 });
+      return null;
+    }
+  } catch {
+    // Netzfehler: Validierung nicht moeglich, Key trotzdem akzeptieren.
+  }
   await dbPut(STORE_CONFIG, { key: CONFIG_KEY_GEMINI, value: entered });
   return entered;
 }
@@ -347,11 +360,19 @@ async function transcribeRecording(id) {
     );
   } catch (err) {
     console.error("Transkription fehlgeschlagen:", err);
+    const msg = String(err && err.message ? err.message : err);
+    // Ungueltiger Key → verwerfen, damit der naechste Versuch neu fragt
+    // (analog zur 401-Behandlung beim Drive-Token).
+    if (/API_KEY_INVALID|API key not valid|API_KEY_EXPIRED|API key expired/i.test(msg)) {
+      try { await dbDelete(STORE_CONFIG, CONFIG_KEY_GEMINI); } catch {}
+      toast("Gemini-API-Key ungueltig — bei „Erneut transkribieren“ neu eingeben", { isError: true, durationMs: 6000 });
+    } else {
+      toast("Transkription fehlgeschlagen", { isError: true });
+    }
     await updateRecordingRecord(id, {
       status: "error",
-      errorMessage: String(err && err.message ? err.message : err),
+      errorMessage: msg,
     });
-    toast("Transkription fehlgeschlagen", { isError: true });
   } finally {
     if (apiKey && fileName) {
       deleteFile(apiKey, fileName).catch(() => {});
@@ -908,7 +929,20 @@ document.addEventListener("keydown", (ev) => {
   if (modal && !modal.hidden) closeMarkdownModal();
 });
 
-// ---------- Drive-Config-Reset via ?reset-drive ----------
+// ---------- Config-Reset via ?reset-drive / ?reset-gemini ----------
+
+async function maybeResetGemini() {
+  if (!new URLSearchParams(location.search).has("reset-gemini")) return;
+  if (!window.confirm("Gespeicherten Gemini-API-Key wirklich loeschen?")) {
+    history.replaceState(null, "", location.pathname + location.hash);
+    return;
+  }
+  try {
+    await openDb();
+    await dbDelete(STORE_CONFIG, CONFIG_KEY_GEMINI);
+  } catch {}
+  history.replaceState(null, "", location.pathname + location.hash);
+}
 
 async function maybeResetDrive() {
   if (!new URLSearchParams(location.search).has("reset-drive")) return;
@@ -953,6 +987,7 @@ async function init() {
   }
   await requestPersistentStorage();
   await maybeResetDrive();
+  await maybeResetGemini();
   bindButtons();
   window.addEventListener("hashchange", onHashChange);
   await updateDriveBanner();

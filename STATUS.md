@@ -1,4 +1,4 @@
-# Voice Pipeline — Stand 2026-04-18 (produktiv, Phase 5 bewusst zurueckgestellt)
+# Voice Pipeline — Stand 2026-07-17 (produktiv, Phase 5 bewusst zurueckgestellt)
 
 Kurzer Einstieg, um nach Pause weiterzumachen.
 
@@ -24,10 +24,10 @@ Kurzer Einstieg, um nach Pause weiterzumachen.
 
 **Phase 4 — Google Drive Upload** [fertig]
 - `pwa/drive.js`: GIS-Token-Client, `drive.file`-Scope, Folder find-or-create, Multipart-Upload.
-- Client-ID per `prompt()` einmalig, in `config[drive_client_id]`.
+- Client-ID seit 2026-07-17 **fest in `app.js` eingebaut** (`DRIVE_CLIENT_ID`), keine manuelle Eingabe mehr. Grund: zweimaliger Key-Verlust durch Chrome-Storage-Eviction, Neueingabe am Handy scheiterte an Tippfehlern (`invalid_client`). OAuth-Web-Client-IDs sind public by design; Absicherung via Authorized JavaScript Origins.
 - Token in `config[drive_token]` (expires ~1h), Folder-ID in `config[drive_folder_id]`.
 - Dateinamen: `YYYYMMDD-HHMMSS-idee.md` bzw. `YYYYMMDD-HHMMSS-meeting-<slug>.md`.
-- Banner-Flow (zweistufig): 1. Tap speichert Client-ID, 2. Tap oeffnet OAuth-Popup — notwendig wegen Chrome-Popup-Blocker / User-Gesture-Verbrauch durch `prompt()`.
+- Banner-Flow jetzt einstufig: Tap auf „Verbinden" oeffnet direkt das OAuth-Popup.
 - Retry-Queue im Markdown-Modal (Upload-Retry oder Transkriptions-Retry je nach Fehlerstelle).
 
 ## Was noch offen ist
@@ -38,6 +38,13 @@ Kurzer Einstieg, um nach Pause weiterzumachen.
 - `scripts/sync-inbox.ps1` ruft `rclone move gdrive:Enkephalos-Inbox → %USERPROFILE%\OneDrive\Enkephalos\inbox --include "*.md"` auf.
 - Task Scheduler `"Enkephalos Inbox Sync"` laeuft alle 5 Min im Hintergrund (registriert via `scripts/install-task.cmd`).
 - End-to-End getestet: 6 Bestandsaufnahmen sowie eine Dummy-Datei wurden korrekt ins Vault verschoben, Drive-Originale geloescht.
+
+### Nachtraege seit 2026-04-18
+
+- **2026-05-22:** Auto-Split fuer Meetings >30 Min umgesetzt (Teil-Scope aus Phase-5-Punkt 1): Audio-Blob wird halbiert, zwei Gemini-Calls (`buildMeetingPromptPart1/2`), Ergebnis konkateniert. `maxOutputTokens` fuer Meetings auf 32768. Chunk-Recovery (der andere Teil-Scope) weiterhin offen.
+- **2026-05-22:** `?reset-drive`-URL-Parameter loescht Drive-Config aus IndexedDB (seit 2026-07-17 mit `confirm()`-Rueckfrage).
+- **2026-07-17:** Storage-Eviction-Fix nach zweimaligem Key-Verlust: `navigator.storage.persist()` beim Init (`requestPersistentStorage()` in `app.js`). Ursache war Chrome-Origin-Eviction — IndexedDB galt ohne persist() als „best effort".
+- **2026-07-17:** Drive-Client-ID hardcoded (siehe Phase 4). SW-Cache v11.
 
 ### Phase 5 — Polish [bewusst zurueckgestellt am 2026-04-18]
 
@@ -75,7 +82,7 @@ pwa/
 ├── recorder.js      # MediaRecorder + Silence-Detection
 ├── gemini.js        # Files API + generateContent + Prompts
 ├── drive.js         # OAuth + Folder + Multipart-Upload + Slug
-├── sw.js            # v9, Network-First auf localhost, Cache-First auf Produktion
+├── sw.js            # v11, Network-First auf localhost, Cache-First auf Produktion
 ├── styles.css
 ├── manifest.json    # name/short_name = "Claudia"
 └── icon-192.png, icon-512.png  # Claudia-Icon (Quelle in assets/)
@@ -90,7 +97,7 @@ docs/                   # Setup-Anleitungen + troubleshooting.md
 
 ## Entschiedene Design-Punkte (nicht aus dem Code erkennbar)
 
-- **Keine config.js-Datei** — alle Keys kommen via IndexedDB `config`-Store (ueber `prompt()` beim ersten Bedarf). `config.example.js` dient nur als Default-Referenz fuer die Konstanten in `app.js`.
+- **Keine config.js-Datei** — Gemini-Key kommt via IndexedDB `config`-Store (ueber `prompt()` beim ersten Bedarf), Drive-Client-ID ist hardcoded. `config.example.js` dient nur als Default-Referenz fuer die Konstanten in `app.js`.
 - **Drive-Ordner per App erzeugt**, nicht manuell. Grund: `drive.file`-Scope sieht nur selbst erzeugte Dateien. Falls User den Ordner bereits manuell anlegte: umbenennen oder loeschen, sonst entstehen zwei gleichnamige.
 - **Testing-Status des OAuth-Consents bleibt** (7-Tage-Token). Production-Review fuer `drive.file`-Scope wurde bewusst vermieden.
 - **Service Worker Network-First auf `localhost`/`127.0.0.1`**, sonst Cache-First. So aktualisiert sich die Dev-App ohne Clear-Site-Data.

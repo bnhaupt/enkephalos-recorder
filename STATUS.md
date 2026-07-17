@@ -44,7 +44,8 @@ Kurzer Einstieg, um nach Pause weiterzumachen.
 - **2026-05-22:** Auto-Split fuer Meetings >30 Min umgesetzt (Teil-Scope aus Phase-5-Punkt 1): Audio-Blob wird halbiert, zwei Gemini-Calls (`buildMeetingPromptPart1/2`), Ergebnis konkateniert. `maxOutputTokens` fuer Meetings auf 32768. Chunk-Recovery (der andere Teil-Scope) weiterhin offen.
 - **2026-05-22:** `?reset-drive`-URL-Parameter loescht Drive-Config aus IndexedDB (seit 2026-07-17 mit `confirm()`-Rueckfrage).
 - **2026-07-17:** Storage-Eviction-Fix nach zweimaligem Key-Verlust: `navigator.storage.persist()` beim Init (`requestPersistentStorage()` in `app.js`). Ursache war Chrome-Origin-Eviction — IndexedDB galt ohne persist() als „best effort".
-- **2026-07-17:** Drive-Client-ID hardcoded (siehe Phase 4). SW-Cache v11.
+- **2026-07-17:** Drive-Client-ID hardcoded (siehe Phase 4).
+- **2026-07-17:** Gemini-Key wird bei Eingabe live gegen die API validiert (`validateApiKey` in `gemini.js`), Whitespace wird entfernt; bei `API_KEY_INVALID`-Fehlern wird der gespeicherte Key automatisch verworfen (analog 401-Handling beim Drive-Token). Neuer Reset-Pfad `?reset-gemini`. SW-Cache v12. End-to-End verifiziert.
 
 ### Phase 5 — Polish [bewusst zurueckgestellt am 2026-04-18]
 

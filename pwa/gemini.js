@@ -240,7 +240,7 @@ duration_sec: ${secs}
 transcription_model: gemini-2.5-flash
 ---
 
-# Idee ${human}
+# Notiz ${human}
 
 ## Transkript
 <woertliches Transkript nach obigen Regeln>

@@ -193,7 +193,7 @@ const STATUS_ICONS = {
   error: { icon: "\u2717", cls: "is-error" },
 };
 
-const KIND_LABEL = { idea: "Idee", meeting: "Meeting" };
+const KIND_LABEL = { idea: "Notiz", meeting: "Meeting" };
 
 function fmtTime(iso) {
   try {
@@ -369,7 +369,7 @@ async function transcribeRecording(id) {
       transcribedAt: new Date().toISOString(),
       errorMessage: null,
     });
-    toast(rec.kind === "idea" ? "Idee transkribiert" : "Meeting transkribiert");
+    toast(rec.kind === "idea" ? "Notiz transkribiert" : "Meeting transkribiert");
     // Drive-Upload nach erfolgreicher Transkription triggern.
     uploadRecordingToDrive(id).catch((err) =>
       console.error("Drive-Upload-Start fehlgeschlagen:", err),
@@ -594,6 +594,8 @@ function resetMeetingUi() {
 function resetIdeaUi() {
   const hint = document.getElementById("idea-hint");
   if (hint) hint.textContent = "Aufnahme laeuft \u2014 einfach sprechen.";
+  const stopBtn = document.getElementById("idea-stop");
+  if (stopBtn) stopBtn.disabled = true;
 }
 
 function setWaveformLevel(rms) {
@@ -673,6 +675,8 @@ async function startRecScreen(kind) {
       currentRec.timerId = setInterval(tickTimer, 250);
     } else {
       resetIdeaUi();
+      const ideaStop = document.getElementById("idea-stop");
+      if (ideaStop) ideaStop.disabled = false;
     }
 
     // Request wake lock wo verfuegbar (still optional, Phase 5 haertet)
@@ -688,7 +692,10 @@ async function startRecScreen(kind) {
 }
 
 async function finalizeAndSave(titleFromUser = null) {
-  if (!currentRec) return;
+  // Guard gegen Doppel-Finalisierung (manueller Stopp + Silence-Auto-Stop
+  // koennen sich zeitlich ueberlappen).
+  if (!currentRec || currentRec.finalizing) return;
+  currentRec.finalizing = true;
   const rec = currentRec;
   clearRecTimer();
 
@@ -716,7 +723,7 @@ async function finalizeAndSave(titleFromUser = null) {
   if (titleFromUser && titleFromUser.trim()) entry.title = titleFromUser.trim();
 
   const newId = await dbAdd(STORE_RECORDINGS, entry);
-  toast(rec.kind === "idea" ? "Idee gespeichert" : "Meeting gespeichert");
+  toast(rec.kind === "idea" ? "Notiz gespeichert" : "Meeting gespeichert");
 
   // Fire-and-forget Transkription.
   transcribeRecording(Number(newId)).catch((err) =>
@@ -875,6 +882,19 @@ function bindButtons() {
     });
   }
 
+  const ideaStopBtn = document.getElementById("idea-stop");
+  if (ideaStopBtn) {
+    ideaStopBtn.addEventListener("click", () => {
+      if (!currentRec || currentRec.kind !== "idea") return;
+      ideaStopBtn.disabled = true;
+      finalizeAndSave().catch((err) => {
+        console.error(err);
+        toast("Speichern fehlgeschlagen", { isError: true });
+        discardAndGoHome();
+      });
+    });
+  }
+
   const list = document.getElementById("history-list");
   if (list) {
     list.addEventListener("click", (ev) => {
@@ -922,7 +942,7 @@ async function showRecording(id) {
 
   mdCurrentId = id;
   titleEl.textContent = rec.title
-    || (rec.kind === "idea" ? "Idee" : "Meeting")
+    || (rec.kind === "idea" ? "Notiz" : "Meeting")
     + " \u00b7 " + fmtTime(rec.createdAt);
 
   body.classList.remove("is-error");

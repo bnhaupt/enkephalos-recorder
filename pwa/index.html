@@ -27,8 +27,8 @@
 
       <div class="mode-grid">
         <a class="mode-btn" href="#idea" data-mode="idea">
-          <span class="mode-btn-label">Kurze Idee</span>
-          <span class="mode-btn-hint">Auto-Stopp nach 3s Stille &middot; max. 2 Min</span>
+          <span class="mode-btn-label">Notiz</span>
+          <span class="mode-btn-hint">Stopp manuell oder nach 3s Stille &middot; max. 2 Min</span>
         </a>
         <a class="mode-btn" href="#meeting" data-mode="meeting">
           <span class="mode-btn-label">Meeting</span>
@@ -75,7 +75,8 @@
       <div class="rec-body idea-body">
         <div class="pulse" aria-hidden="true"></div>
         <p id="idea-hint" class="idea-hint">Mikrofon wird initialisiert &hellip;</p>
-        <p class="idea-subhint">Stoppt automatisch nach 3 Sekunden Stille.</p>
+        <button type="button" id="idea-stop" class="stop-btn" disabled>Stopp</button>
+        <p class="idea-subhint">Stoppt auch automatisch nach 3 Sekunden Stille.</p>
       </div>
     </section>
 

@@ -163,7 +163,7 @@ export function buildFilename(rec) {
   const ts =
     `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-` +
     `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  if (rec.kind === "idea") return `${ts}-idee.md`;
+  if (rec.kind === "idea") return `${ts}-notiz.md`;
   const slug = slugify(rec.title || "") || "ohne-titel";
   return `${ts}-meeting-${slug}.md`;
 }

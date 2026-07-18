@@ -17,7 +17,7 @@ export const CONFIG = {
   GOOGLE_DRIVE_FOLDER_NAME: "Enkephalos-Inbox",
 
   // Aufnahme-Parameter
-  IDEA_MAX_DURATION_SEC: 120,       // Kurze Idee: Max 2 Minuten
+  IDEA_MAX_DURATION_SEC: 120,       // Kurze Notiz: Max 2 Minuten
   IDEA_SILENCE_THRESHOLD: 0.02,     // RMS-Schwelle fuer Silence Detection
   IDEA_SILENCE_DURATION_MS: 3000,   // 3s Stille = Stop
 

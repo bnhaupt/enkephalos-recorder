@@ -1,10 +1,10 @@
 # Enkephalos Voice Pipeline
 
-Eine Progressive Web App fuer das Pixel 7 Pro, die kurze Ideen und Meetings bis 1 Stunde aufzeichnet, per Gemini 2.5 Flash transkribiert und strukturiert, und die Ergebnisse in das Enkephalos-Vault einspeist.
+Eine Progressive Web App fuer das Pixel 7 Pro, die kurze Notizen und Meetings bis 1 Stunde aufzeichnet, per Gemini 2.5 Flash transkribiert und strukturiert, und die Ergebnisse in das Enkephalos-Vault einspeist.
 
 ## Was es macht
 
-- **Kurze Idee aufnehmen:** Tippen, sprechen, Auto-Stop nach Stille. Landet als strukturierte Markdown-Notiz im Vault-Inbox.
+- **Notiz aufnehmen:** Tippen, sprechen, Stopp-Button tippen (oder Auto-Stopp nach Stille). Landet als strukturierte Markdown-Notiz im Vault-Inbox.
 - **Meeting aufzeichnen:** Start-Stopp bis 60 Min. Transkript mit Sprecher-Trennung, Entscheidungen und Todos extrahiert, als Protokoll im Vault-Inbox.
 - **Ein-Weg-Pipeline:** Pixel → Gemini → Google Drive → Laptop. Kein Server, keine Cloud-Backend-Komplexitaet.
 

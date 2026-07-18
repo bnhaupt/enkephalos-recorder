@@ -5,14 +5,14 @@ Kurzer Einstieg, um nach Pause weiterzumachen.
 ## Was laeuft
 
 **Phase 1 — UI-Shell + IndexedDB** [fertig]
-- Drei Screens (Home, Meeting, Idee), Hash-Router, History-Liste.
+- Drei Screens (Home, Meeting, Notiz), Hash-Router, History-Liste.
 - IndexedDB `enkephalos-recorder`, Stores `config` + `recordings`.
 - Icon: stilisiertes Frauengesicht in Claude-Coral, „Claudia"-Schriftzug. Quelle unter `assets/claudia-icon-source.png`, Skalierung auf 192/512 via `scripts/make-icons.py` (bzw. direktes Resize aus der Quelle).
 - App-Name im Manifest: `Claudia` (name und short_name) — erscheint so auf dem Pixel-Homescreen.
 
 **Phase 2 — Aufnahme lokal** [fertig]
 - `pwa/recorder.js`: MediaRecorder + RMS-Level via Web-Audio.
-- Idee: Auto-Stopp nach 3s Stille oder 2 Min, Speech-Gate.
+- Notiz (frueher "Idee", interner kind-Key bleibt `idea`): manueller Stopp-Button, Auto-Stopp nach 3s Stille oder 2 Min, Speech-Gate. Dateiname jetzt `-notiz.md`.
 - Meeting: Timer, Live-Pegelmeter-Waveform, Titel-Modal mit Kategorien-Dropdown.
 - Dropdown-Optionen (werden als `rec.title` gespeichert): `jf Abteilungsleiter`, `jf Oberaerzte-Reha`, `jf Oberaerzte-Akut`, `jf Therapien, Therapieplanung und Controlling`, `jf Klinikleitung-Interdisziplinaer`, `jf Klinikleitung-Aerzte`, `jf Personal`, `jf SKAI-Team`, `jf Tagesklinik`, `jf Geschaeftsfuehrung`, `Sonstiges Meeting`. Letzte Auswahl wird in `config` persistiert (Key `last_meeting_category`).
 

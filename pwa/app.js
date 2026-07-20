@@ -16,8 +16,6 @@ import {
   validateApiKey,
   buildIdeaPrompt,
   buildMeetingPrompt,
-  buildMeetingPromptPart1,
-  buildMeetingPromptPart2,
 } from "./gemini.js";
 import {
   hasGis,
@@ -62,6 +60,9 @@ const DEFAULTS = {
 const GEMINI_MODEL = "gemini-2.5-flash";
 const CONFIG_KEY_GEMINI = "gemini_api_key";
 const CONFIG_KEY_LAST_CATEGORY = "last_meeting_category";
+// Teilnehmer werden je Kategorie gemerkt: wiederkehrende Jour-Fixe haben
+// meist denselben Personenkreis, der so nur einmal getippt werden muss.
+const CONFIG_KEY_PARTICIPANTS_PREFIX = "meeting_participants:";
 const CONFIG_KEY_DRIVE_CLIENT_ID = "drive_client_id";
 const CONFIG_KEY_DRIVE_TOKEN = "drive_token";
 const CONFIG_KEY_DRIVE_FOLDER_ID = "drive_folder_id";
@@ -278,38 +279,13 @@ async function getOrAskApiKey() {
   return entered;
 }
 
-const SPLIT_THRESHOLD_SEC = 1800; // 30 Minuten
 // inline_data-Limit: 20MB pro Request inkl. Base64-Overhead (+33%).
 const INLINE_MAX_BYTES = 14 * 1024 * 1024;
 
-async function transcribeMeetingInParts(apiKey, rec) {
-  const totalSec = rec.durationSec;
-  const halfSize = Math.floor(rec.audioBlob.size / 2);
-  const halfSec = totalSec / 2;
-  const mime = rec.mimeType || rec.audioBlob.type || "audio/webm";
-  const meta = { isoTimestamp: rec.createdAt, durationSec: halfSec, title: rec.title };
-
-  toast("Meeting wird in zwei Teilen parallel transkribiert \u2026");
-
-  const runPart = async (blob, label, promptText) => {
-    let file = await uploadAudio(apiKey, blob, label);
-    try {
-      file = await waitForFileActive(apiKey, file);
-      return await generateContent(apiKey, GEMINI_MODEL, file, promptText, { meeting: true });
-    } finally {
-      deleteFile(apiKey, file.name).catch(() => {});
-    }
-  };
-
-  const blob1 = rec.audioBlob.slice(0, halfSize, mime);
-  const blob2 = rec.audioBlob.slice(halfSize, rec.audioBlob.size, mime);
-  const [md1, md2] = await Promise.all([
-    runPart(blob1, `enkephalos-${rec.id}-p1-${Date.now()}`, buildMeetingPromptPart1(meta, totalSec)),
-    runPart(blob2, `enkephalos-${rec.id}-p2-${Date.now()}`, buildMeetingPromptPart2({ ...meta, durationSec: totalSec - halfSec }, halfSec, totalSec)),
-  ]);
-
-  return md1 + "\n\n---\n\n" + md2;
-}
+// Kein Audio-Split mehr: Gemini 2.5 Flash fasst ~1h Audio (~100k Token) in
+// einem Request. Die fruehere Byte-Teilung des WebM-Containers erzeugte einen
+// nicht dekodierbaren zweiten Teil (kein EBML-Header) -> Datenverlust in der
+// hinteren Haelfte. Lange Meetings laufen jetzt als ein einziger Files-API-Call.
 
 const activeTranscriptions = new Set();
 
@@ -343,12 +319,11 @@ async function transcribeRecording(id) {
       isoTimestamp: rec.createdAt,
       durationSec: rec.durationSec,
       title: rec.title,
+      participants: rec.participants,
     };
 
     let markdown;
-    if (rec.kind === "meeting" && rec.durationSec > SPLIT_THRESHOLD_SEC) {
-      markdown = await transcribeMeetingInParts(apiKey, rec);
-    } else if (rec.kind === "idea" && rec.audioBlob.size <= INLINE_MAX_BYTES) {
+    if (rec.kind === "idea" && rec.audioBlob.size <= INLINE_MAX_BYTES) {
       // Kurze Aufnahmen inline: ein Request statt Upload + Poll + Delete.
       markdown = await generateContentInline(apiKey, GEMINI_MODEL, rec.audioBlob, buildIdeaPrompt(meta), { meeting: false });
     } else {
@@ -691,7 +666,7 @@ async function startRecScreen(kind) {
   }
 }
 
-async function finalizeAndSave(titleFromUser = null) {
+async function finalizeAndSave(titleFromUser = null, participantsFromUser = null) {
   // Guard gegen Doppel-Finalisierung (manueller Stopp + Silence-Auto-Stop
   // koennen sich zeitlich ueberlappen).
   if (!currentRec || currentRec.finalizing) return;
@@ -721,6 +696,9 @@ async function finalizeAndSave(titleFromUser = null) {
     status: "pending",
   };
   if (titleFromUser && titleFromUser.trim()) entry.title = titleFromUser.trim();
+  if (participantsFromUser && participantsFromUser.trim()) {
+    entry.participants = participantsFromUser.trim();
+  }
 
   const newId = await dbAdd(STORE_RECORDINGS, entry);
   toast(rec.kind === "idea" ? "Notiz gespeichert" : "Meeting gespeichert");
@@ -745,8 +723,8 @@ async function finalizeMeetingFlow() {
   clearRecTimer();
   const stopBtn = document.getElementById("meeting-stop");
   if (stopBtn) stopBtn.disabled = true;
-  const title = await askForTitle();
-  await finalizeAndSave(title);
+  const { title, participants } = await askForTitle();
+  await finalizeAndSave(title, participants);
 }
 
 function discardAndGoHome() {
@@ -794,12 +772,28 @@ document.addEventListener("visibilitychange", () => {
 
 // ---------- Title modal ----------
 
+async function loadParticipantsFor(category) {
+  if (!category) return "";
+  try {
+    const entry = await dbGet(
+      STORE_CONFIG,
+      CONFIG_KEY_PARTICIPANTS_PREFIX + category,
+    );
+    return entry && entry.value ? entry.value : "";
+  } catch {
+    return "";
+  }
+}
+
 async function askForTitle() {
   const modal = document.getElementById("title-modal");
   const categorySel = document.getElementById("meeting-category");
   const input = document.getElementById("title-input");
+  const participantsEl = document.getElementById("participants-input");
   const ok = document.getElementById("title-ok");
-  if (!modal || !categorySel || !input || !ok) return null;
+  if (!modal || !categorySel || !input || !participantsEl || !ok) {
+    return { title: null, participants: "" };
+  }
 
   // Letzte Auswahl vorbelegen.
   try {
@@ -813,28 +807,51 @@ async function askForTitle() {
   } catch {}
 
   input.value = "";
+  // Gemerkte Teilnehmer der vorbelegten Kategorie laden.
+  participantsEl.value = await loadParticipantsFor(categorySel.value);
   modal.hidden = false;
   setTimeout(() => categorySel.focus(), 30);
 
   return new Promise((resolve) => {
+    // Kategoriewechsel: gemerkte Teilnehmer der neuen Kategorie nachladen,
+    // aber nur wenn der Nutzer das Feld nicht bereits selbst geaendert hat.
+    let participantsTouched = false;
+    const onParticipantsInput = () => { participantsTouched = true; };
+    const onCategoryChange = async () => {
+      if (participantsTouched) return;
+      participantsEl.value = await loadParticipantsFor(categorySel.value);
+    };
+
     const finish = async () => {
       const category = categorySel.value || "Sonstiges Meeting";
       const suffix = input.value.trim();
       const title = suffix ? `${category} - ${suffix}` : category;
+      const participants = participantsEl.value.trim();
 
       modal.hidden = true;
       ok.removeEventListener("click", onOk);
       input.removeEventListener("keydown", onKey);
       categorySel.removeEventListener("keydown", onKey);
+      categorySel.removeEventListener("change", onCategoryChange);
+      participantsEl.removeEventListener("input", onParticipantsInput);
 
       try {
         await dbPut(STORE_CONFIG, {
           key: CONFIG_KEY_LAST_CATEGORY,
           value: category,
         });
+        // Teilnehmer je Kategorie merken (bzw. leeren Eintrag entfernen).
+        if (participants) {
+          await dbPut(STORE_CONFIG, {
+            key: CONFIG_KEY_PARTICIPANTS_PREFIX + category,
+            value: participants,
+          });
+        } else {
+          await dbDelete(STORE_CONFIG, CONFIG_KEY_PARTICIPANTS_PREFIX + category);
+        }
       } catch {}
 
-      resolve(title);
+      resolve({ title, participants });
     };
     const onOk = () => finish();
     const onKey = (ev) => {
@@ -844,6 +861,8 @@ async function askForTitle() {
     ok.addEventListener("click", onOk);
     input.addEventListener("keydown", onKey);
     categorySel.addEventListener("keydown", onKey);
+    categorySel.addEventListener("change", onCategoryChange);
+    participantsEl.addEventListener("input", onParticipantsInput);
   });
 }
 

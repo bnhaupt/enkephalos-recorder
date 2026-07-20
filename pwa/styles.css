@@ -442,7 +442,8 @@ main#app {
 }
 
 .modal-select,
-#title-input {
+#title-input,
+#participants-input {
   width: 100%;
   min-height: 48px;
   padding: 0.75rem 1rem;
@@ -454,6 +455,12 @@ main#app {
   outline: none;
   appearance: none;
   -webkit-appearance: none;
+}
+
+#participants-input {
+  font-family: inherit;
+  line-height: 1.4;
+  resize: vertical;
 }
 
 .modal-select {
@@ -469,7 +476,8 @@ main#app {
 }
 
 .modal-select:focus,
-#title-input:focus {
+#title-input:focus,
+#participants-input:focus {
   border-color: var(--accent);
 }
 

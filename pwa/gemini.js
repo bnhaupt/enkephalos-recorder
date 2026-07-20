@@ -25,12 +25,16 @@ const GENERATION_CONFIG = {
   thinkingConfig: { thinkingBudget: 0 },
 };
 
+// Meeting: Diarisierung (Sprecher ueber die Zeit konsistent halten) und die
+// Synthese des Kurzueberblicks SIND Reasoning-Aufgaben -> Thinking dynamisch
+// aktiv. Hoeheres Output-Limit, damit lange Transkripte nicht abgeschnitten
+// werden.
 const MEETING_GENERATION_CONFIG = {
   temperature: 0,
   topP: 0.95,
-  maxOutputTokens: 32768,
+  maxOutputTokens: 65536,
   responseMimeType: "text/plain",
-  thinkingConfig: { thinkingBudget: 0 },
+  thinkingConfig: { thinkingBudget: -1 },
 };
 
 async function readErr(res) {
@@ -205,11 +209,11 @@ const PROMPT_RULES = `Regeln (verbindlich):
 - Unverstaendliche Stellen als [unverstaendlich] markieren, unsichere Woerter als [? wort].
 - Wenn das Audio leer, stumm oder durchgehend unverstaendlich ist: schreibe genau das ins Transkript. Rekonstruiere keinen Inhalt aus Vermutungen oder Kontext.
 - Medizinische Fachbegriffe exakt so wiedergeben, wie sie gesprochen wurden; bei Unsicherheit [? begriff].
-- Stil aller Zusammenfassungen: nuechtern, telegrammartig, streng am Gesagten. Keine Bewertungen, keine Fuellwoerter, kein Management-Jargon.`;
+- Stil aller Zusammenfassungen: nuechtern und dicht, keine Bewertungen, keine Fuellwoerter, kein Management-Jargon. Zusammenfassungen duerfen den Inhalt in eigenen Worten verdichten und das Thema benennen, solange jede Aussage durch das Gesagte gedeckt ist. Das woertliche Transkript bleibt davon unberuehrt.`;
 
 const MEETING_RULES = `${PROMPT_RULES}
 - Entscheidungen und Todos: NUR was woertlich als Entscheidung oder Auftrag ausgesprochen wurde. Wenn keine vorhanden: "Keine." Nichts aus dem Gespraechsverlauf ableiten.
-- Sprecherlabels (Sprecher 1, Sprecher 2, ...) nur bei eindeutiger akustischer Trennung, sonst Transkript ohne Labels. Namen nur verwenden, wenn sie im Gespraech genannt werden.`;
+- Sprechertrennung: Schaetze zuerst die Zahl akustisch unterscheidbarer Sprecher und halte die Labels (Sprecher 1, Sprecher 2, ...) im gesamten Transkript konsistent -- dieselbe Stimme behaelt dieselbe Nummer. Ordne einem Label einen Namen nur zu, wenn dieser Name im Gespraech eindeutig dieser Stimme zugeordnet werden kann. Bei durchgehend nicht trennbaren Stimmen: Transkript ohne Labels und das im Kurzueberblick vermerken.`;
 
 function buildMetaBlock({ isoTimestamp, durationSec, title }) {
   const lines = [
@@ -252,11 +256,17 @@ transcription_model: gemini-2.5-flash
 <wiki/entities/..., projects/... oder areas/... NUR wenn der Inhalt es eindeutig hergibt. Sonst exakt: "Unklar, beim Ingest entscheiden.">`;
 }
 
+function buildParticipantsBlock(participants) {
+  if (!participants || !participants.trim()) return "";
+  return `\nTeilnehmer laut Nutzer (Kontext, KEINE woertliche Quelle): ${participants.trim()}
+Nutze diese Angabe als Anker fuer die Sprechertrennung: als Schaetzung der Sprecherzahl und, wo eine Stimme klar einem genannten Namen zuzuordnen ist, zur Benennung. Erfinde daraus keine Aussagen; wer nicht hoerbar ist, wird nicht ins Transkript aufgenommen.\n`;
+}
+
 export function buildMeetingPrompt(meta) {
   const secs = Math.round(meta.durationSec);
   const title = meta.title || fmtDe(meta.isoTimestamp);
   return `Du bekommst eine deutschsprachige Meeting-Aufnahme (bis 60 Min) aus einer neurologischen Klinik. Teilnehmer: Aerzte, Therapeuten, Pflegekraefte oder Verwaltung.
-
+${buildParticipantsBlock(meta.participants)}
 ${MEETING_RULES}
 
 Metadaten:
@@ -276,7 +286,10 @@ transcription_model: gemini-2.5-flash
 # Meeting: ${title}
 
 ## Kurzueberblick
-<2-4 telegrammartige Saetze: Kernthema, Ergebnisse. Nur belegbare Aussagen.>
+<3-6 Saetze in eigenen Worten: Worum ging es, Anlass, wichtigste Ergebnisse. Ziel: Auch wer nicht dabei war, versteht den Gegenstand. Synthese ausdruecklich erlaubt, solange durch das Gesagte gedeckt.>
+
+## Besprochene Themen
+<Stichpunktliste der behandelten Themen in Reihenfolge des Gespraechs, pro Thema ein Bullet mit knapper Einordnung. Wenn nicht rekonstruierbar: "Nicht rekonstruierbar.">
 
 ## Teilnehmer (soweit erkennbar)
 <Nur im Gespraech genannte Namen/Rollen. Sonst exakt: "Nicht erkennbar.">

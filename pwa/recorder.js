@@ -40,19 +40,32 @@ export async function startRecording(opts) {
     onAutoStop,
   } = opts;
 
+  // Idee: Diktat aus der Naehe -> DSP-Aufbereitung hilft (NS/AGC an).
+  // Meeting: mehrere Sprecher im Raum -> Rohsignal ist besser. NS/AGC
+  // schneiden leise/entfernte Sprecher weg und pumpen den Raumpegel, was
+  // Sprechertrennung und Vollstaendigkeit verschlechtert.
+  const isMeeting = mode === "meeting";
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-      channelCount: 1,
-    },
+    audio: isMeeting
+      ? {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1,
+        }
+      : {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        },
   });
 
   const mimeType = pickMimeType();
-  // 32 kbps Opus mono ist fuer Sprache transparent und macht Uploads
-  // ~4x kleiner als der Chrome-Default.
-  const recorderOpts = { audioBitsPerSecond: 32000 };
+  // Idee: 32 kbps Opus mono ist fuer einen nahen Sprecher transparent.
+  // Meeting: 96 kbps erhaelt die Timbre-/Raum-Cues, auf denen Sprecher-
+  // trennung und das Erfassen leiser Stimmen beruhen (60 min ~ 43 MB).
+  const recorderOpts = { audioBitsPerSecond: isMeeting ? 96000 : 32000 };
   if (mimeType) recorderOpts.mimeType = mimeType;
   const recorder = new MediaRecorder(stream, recorderOpts);
 

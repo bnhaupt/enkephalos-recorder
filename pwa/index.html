@@ -34,6 +34,10 @@
           <span class="mode-btn-label">Meeting</span>
           <span class="mode-btn-hint">Start / Stopp manuell &middot; bis 60 Min</span>
         </a>
+        <a class="mode-btn" href="#auftrag" data-mode="auftrag">
+          <span class="mode-btn-label">Auftrag</span>
+          <span class="mode-btn-hint">Wird auf dem Rechner im Buero bearbeitet &middot; max. 5 Min</span>
+        </a>
       </div>
 
       <section class="history">
@@ -77,6 +81,19 @@
         <p id="idea-hint" class="idea-hint">Mikrofon wird initialisiert &hellip;</p>
         <button type="button" id="idea-stop" class="stop-btn" disabled>Stopp</button>
         <p class="idea-subhint">Stoppt auch automatisch nach 3 Sekunden Stille.</p>
+      </div>
+    </section>
+
+    <section id="screen-auftrag" class="screen" aria-hidden="true">
+      <header class="screen-header">
+        <a class="back-link" href="#home" aria-label="Abbrechen">&larr; Abbrechen</a>
+      </header>
+
+      <div class="rec-body idea-body">
+        <div class="pulse" aria-hidden="true"></div>
+        <p id="auftrag-hint" class="idea-hint">Mikrofon wird initialisiert &hellip;</p>
+        <button type="button" id="auftrag-stop" class="stop-btn" disabled>Stopp</button>
+        <p class="idea-subhint">Stoppt auch automatisch nach 5 Sekunden Stille.</p>
       </div>
     </section>
 

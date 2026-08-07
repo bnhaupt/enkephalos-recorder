@@ -256,6 +256,53 @@ transcription_model: gemini-2.5-flash
 <wiki/entities/..., projects/... oder areas/... NUR wenn der Inhalt es eindeutig hergibt. Sonst exakt: "Unklar, beim Ingest entscheiden.">`;
 }
 
+export function buildAuftragPrompt(meta) {
+  const secs = Math.round(meta.durationSec);
+  return `Du bekommst eine kurze deutschsprachige Sprachaufnahme eines Klinikdirektors (Neurologie/Geriatrie). Er diktiert darin einen Arbeitsauftrag, den anschliessend ein KI-Assistent auf seinem Rechner bearbeitet — typischerweise waehrend der Visite gesprochen.
+
+Deine Aufgabe ist ausschliesslich, den Auftrag zu transkribieren und in eine bearbeitbare Form zu bringen.
+
+WICHTIG: Beantworte den Auftrag NICHT. Recherchiere nichts, schlussfolgere nichts, ergaenze kein Fachwissen. Du reichst den Auftrag nur weiter.
+
+${PROMPT_RULES}
+- Der Abschnitt "Auftrag" formuliert um, was verlangt wird — knapp, im Imperativ, ohne Fuellwoerter. Er darf verdichten und Selbstkorrekturen des Sprechers beruecksichtigen ("also nein, eigentlich meine ich..."), aber nichts hinzufuegen, was nicht gesagt wurde.
+- Wenn das Audio keinen erkennbaren Auftrag enthaelt: schreibe unter "Auftrag" exakt "Kein Auftrag erkennbar." und lasse das Transkript fuer sich sprechen.
+
+Metadaten:
+${buildMetaBlock(meta)}
+
+Bestimme die Auftragsart (Feld kind) nach diesen Regeln, im Zweifel "recherche":
+- "recherche" — Literatur, Evidenzlage, Leitlinien, Marktueberblick, alles was Suche im Netz braucht
+- "klinisch" — konkrete Fachfrage aus der Versorgung, die eine kurze belegte Antwort verlangt (Dosierung, Kontraindikation, Differentialdiagnose)
+- "vault" — bezieht sich auf eigene Notizen, Protokolle, Projekte oder frueheres Material ("meine letzten Protokolle", "was hatten wir dazu festgehalten")
+- "dokument" — ein Brief, Bericht, Konzept oder eine Praesentation soll entworfen werden
+
+Das Feld titel ist eine knappe Sachbezeichnung, hoechstens sechs Woerter, ohne Artikel am Anfang. Daraus wird ein Dateiname gebildet.
+
+Gib exakt folgendes Markdown zurueck, nichts davor, nichts danach:
+
+---
+type: auftrag
+kind: <recherche|klinisch|vault|dokument>
+captured: ${meta.isoTimestamp}
+duration_sec: ${secs}
+titel: <knappe Sachbezeichnung>
+transcription_model: gemini-2.5-flash
+status: offen
+---
+
+# Auftrag: <derselbe Titel>
+
+## Auftrag
+<Was zu tun ist, knapp und im Imperativ, streng aus dem Gesagten.>
+
+## Kontext
+<Anlass, Hintergrund, Randbedingungen — nur soweit gesagt. Sonst exakt: "Keiner genannt.">
+
+## Woertliches Transkript
+<woertliches Transkript nach obigen Regeln>`;
+}
+
 function buildParticipantsBlock(participants) {
   if (!participants || !participants.trim()) return "";
   return `\nTeilnehmer laut Nutzer (Kontext, KEINE woertliche Quelle): ${participants.trim()}

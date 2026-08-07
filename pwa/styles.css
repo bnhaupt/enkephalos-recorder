@@ -228,6 +228,12 @@ main#app {
 
 .history-kind {
   color: var(--fg);
+  /* Auftragszeilen tragen zusaetzlich den Titel — der darf die Spalte
+     nicht sprengen. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .history-duration {

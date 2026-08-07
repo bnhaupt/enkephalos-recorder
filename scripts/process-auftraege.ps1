@@ -2,18 +2,24 @@
 #
 # Holt diktierte Arbeitsauftraege aus Google Drive `Enkephalos-Auftraege/`,
 # laesst sie von Claude Code headless bearbeiten und legt das Ergebnis in die
-# Vault-Inbox. Der Status wird ueber die Drive-Ordnerstruktur zurueckgemeldet,
-# damit die PWA ihn ohne zusaetzliche Berechtigung lesen kann:
+# Vault-Inbox.
 #
-#   Enkephalos-Auftraege/            offen
-#   Enkephalos-Auftraege/in-arbeit/  wird gerade bearbeitet
-#   Enkephalos-Auftraege/fertig/     erledigt
-#   Enkephalos-Auftraege/fehler/     fehlgeschlagen
+# Statusrueckkanal an die PWA — ueber den Dateinamen:
 #
-# Der Trick dabei: rclone verschiebt serverseitig, die Drive-Datei-ID bleibt
-# erhalten. Die PWA hat die Datei selbst angelegt und darf sie deshalb unter
-# dem Scope `drive.file` weiterhin abfragen — sie liest schlicht ab, in
-# welchem Ordner die Datei inzwischen liegt.
+#   <stamm>.md            offen, noch nicht angefasst
+#   <stamm>--arbeit.md    wird gerade bearbeitet
+#   <stamm>--fertig.md    erledigt
+#   <stamm>--fehler.md    fehlgeschlagen
+#
+# Warum ueber den Namen und nicht ueber Unterordner: Die PWA hat den Drive-
+# Scope `drive.file` und sieht damit ausschliesslich Dateien, die sie selbst
+# angelegt hat. Ordner, die dieses Skript anlegt, kann sie nicht einmal
+# aufloesen. Ihre eigene Auftragsdatei darf sie dagegen jederzeit abfragen —
+# und rclone benennt serverseitig um, die Datei-ID bleibt also erhalten.
+# Die PWA liest schlicht den aktuellen Namen und leitet daraus den Status ab.
+#
+# Das Umbenennen auf `--arbeit` ist zugleich die Beanspruchung: ein parallel
+# startender Lauf sieht die Datei dann nicht mehr als offen.
 #
 # Schreibgrenze: Claude bekommt in keinem Profil Schreibrechte auf das Vault.
 # Das Ergebnis kommt ueber stdout zurueck, die Datei schreibt dieses Skript.
@@ -44,6 +50,10 @@ $TimeoutMinutes = 20
 
 # Wie lange eine Sperrdatei gilt, bevor sie als verwaist betrachtet wird.
 $LockStaleMinutes = 45
+
+# Erledigte Auftragsdateien bleiben in Drive liegen, damit die PWA den
+# Status weiterhin ablesen kann. Nach dieser Frist werden sie aufgeraeumt.
+$KeepFertigDays = 14
 
 # ---------- Ausfuehrung ----------
 
@@ -84,6 +94,24 @@ function Write-Utf8NoBom {
     param([string]$Path, [string]$Content)
     $enc = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($Path, $Content, $enc)
+}
+
+# Statusmarkierung durch Umbenennen. Gibt den neuen Namen zurueck, oder $null.
+function Set-AuftragStatus {
+    param([string]$CurrentName, [string]$NewName)
+    $r = Invoke-Rclone @("moveto", "$RemoteRoot/$CurrentName", "$RemoteRoot/$NewName")
+    if ($r.Code -ne 0) {
+        Write-Log "Umbenennen '$CurrentName' -> '$NewName' fehlgeschlagen (exit $($r.Code))."
+        return $null
+    }
+    return $NewName
+}
+
+function Get-RemoteNames {
+    param([string]$Include)
+    $r = Invoke-Rclone @("lsf", $RemoteRoot, "--files-only", "--include", $Include)
+    if ($r.Code -ne 0) { return $null }
+    return @($r.Output | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -like "*.md" })
 }
 
 # ---------- Vorbedingungen ----------
@@ -133,24 +161,43 @@ Write-Utf8NoBom -Path $LockFile -Content "$PID  $(Get-Date -Format 's')"
 
 try {
 
-    # ---------- Drive-Struktur sicherstellen ----------
+    # ---------- Ordner sicherstellen ----------
 
-    foreach ($sub in @("", "/in-arbeit", "/fertig", "/fehler")) {
-        $r = Invoke-Rclone @("mkdir", "$RemoteRoot$sub")
-        if ($r.Code -ne 0) {
-            Write-Log "Drive-Ordner '$RemoteRoot$sub' nicht anlegbar (exit $($r.Code)) -- Abbruch."
-            exit 1
+    $r = Invoke-Rclone @("mkdir", $RemoteRoot)
+    if ($r.Code -ne 0) {
+        Write-Log "Drive-Ordner '$RemoteRoot' nicht erreichbar (exit $($r.Code)) -- Abbruch."
+        exit 1
+    }
+
+    # ---------- Verwaiste Beanspruchungen zuruecknehmen ----------
+
+    # Wir halten ab hier die Sperre. Alles, was jetzt noch als `--arbeit`
+    # markiert ist, stammt folglich aus einem abgestuerzten Lauf und muss
+    # zurueck in die Warteschlange, statt fuer immer haengenzubleiben.
+    $stale = Get-RemoteNames "*--arbeit.md"
+    if ($null -ne $stale) {
+        foreach ($s in $stale) {
+            $back = $s -replace "--arbeit\.md$", ".md"
+            Write-Log "Verwaiste Beanspruchung zurueckgesetzt: $s"
+            Set-AuftragStatus -CurrentName $s -NewName $back | Out-Null
         }
     }
 
-    # ---------- Offene Auftraege auflisten ----------
+    # ---------- Aufgeraeumt ----------
 
-    $r = Invoke-Rclone @("lsf", $RemoteRoot, "--files-only", "--include", "*.md")
-    if ($r.Code -ne 0) {
-        Write-Log "Drive-Liste fehlgeschlagen (exit $($r.Code)) -- Abbruch."
+    Invoke-Rclone @(
+        "delete", $RemoteRoot, "--include", "*--fertig.md",
+        "--min-age", "${KeepFertigDays}d"
+    ) | Out-Null
+
+    # ---------- Offene Auftraege ----------
+
+    $alle = Get-RemoteNames "*.md"
+    if ($null -eq $alle) {
+        Write-Log "Drive-Liste fehlgeschlagen -- Abbruch."
         exit 1
     }
-    $pending = @($r.Output | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -like "*.md" })
+    $pending = @($alle | Where-Object { $_ -notmatch "--(arbeit|fertig|fehler)\.md$" })
 
     if ($pending.Count -eq 0) { exit 0 }
     Write-Log "$($pending.Count) offene(r) Auftrag/Auftraege gefunden."
@@ -167,19 +214,15 @@ try {
         if (Test-Path -LiteralPath $workDir) { Remove-Item -LiteralPath $workDir -Recurse -Force }
         New-Item -ItemType Directory -Path $workDir -Force | Out-Null
 
-        # Zuerst beanspruchen, dann herunterladen. Andersherum koennte ein
-        # paralleler Lauf denselben Auftrag greifen.
-        $r = Invoke-Rclone @("moveto", "$RemoteRoot/$name", "$RemoteRoot/in-arbeit/$name")
-        if ($r.Code -ne 0) {
-            Write-Log "Konnte Auftrag nicht nach in-arbeit verschieben (exit $($r.Code)) -- uebersprungen."
-            continue
-        }
+        # Zuerst beanspruchen, dann herunterladen.
+        $claimed = Set-AuftragStatus -CurrentName $name -NewName "$stem--arbeit.md"
+        if (-not $claimed) { continue }
 
         $localAuftrag = Join-Path $workDir $name
-        $r = Invoke-Rclone @("copyto", "$RemoteRoot/in-arbeit/$name", $localAuftrag)
+        $r = Invoke-Rclone @("copyto", "$RemoteRoot/$claimed", $localAuftrag)
         if ($r.Code -ne 0 -or -not (Test-Path -LiteralPath $localAuftrag)) {
             Write-Log "Download fehlgeschlagen (exit $($r.Code))."
-            Invoke-Rclone @("moveto", "$RemoteRoot/in-arbeit/$name", "$RemoteRoot/fehler/$name") | Out-Null
+            Set-AuftragStatus -CurrentName $claimed -NewName "$stem--fehler.md" | Out-Null
             continue
         }
 
@@ -223,7 +266,7 @@ $anweisung
 
 ---
 
-Aktueller Zeitstempel fuer das Feld `bearbeitet`: $jetzt
+Aktueller Zeitstempel fuer das Feld ``bearbeitet``: $jetzt
 
 Der zu bearbeitende Auftrag folgt. Er wurde aus einem Sprachdiktat erzeugt.
 
@@ -309,7 +352,7 @@ $auftragText
                 Write-Log "Artefakt -> 00_INBOX: $($a.Name)"
             }
 
-            Invoke-Rclone @("moveto", "$RemoteRoot/in-arbeit/$name", "$RemoteRoot/fertig/$name") | Out-Null
+            Set-AuftragStatus -CurrentName $claimed -NewName "$stem--fertig.md" | Out-Null
             Write-Log "Erledigt in ${dauer}s -> $ergebnisName"
         } else {
             # Auch der Fehlschlag landet sichtbar in der Inbox. Ein still
@@ -334,7 +377,7 @@ Laufzeit bis zum Abbruch: ${dauer}s
 $auftragText
 "@
             Write-Utf8NoBom -Path $zielPfad -Content $notiz
-            Invoke-Rclone @("moveto", "$RemoteRoot/in-arbeit/$name", "$RemoteRoot/fehler/$name") | Out-Null
+            Set-AuftragStatus -CurrentName $claimed -NewName "$stem--fehler.md" | Out-Null
             Write-Log "FEHLGESCHLAGEN nach ${dauer}s: $fehlerText"
         }
 

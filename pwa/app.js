@@ -16,6 +16,7 @@ import {
   validateApiKey,
   buildIdeaPrompt,
   buildMeetingPrompt,
+  buildAuftragPrompt,
 } from "./gemini.js";
 import {
   hasGis,
@@ -26,6 +27,8 @@ import {
   ensureFolder,
   uploadMarkdown,
   buildFilename,
+  getFileMeta,
+  AUFTRAG_FOLDER_NAME,
 } from "./drive.js";
 
 // ---------- Service Worker ----------
@@ -55,6 +58,11 @@ const DEFAULTS = {
   IDEA_SILENCE_THRESHOLD: 0.02,
   IDEA_SILENCE_DURATION_MS: 3000,
   MEETING_MAX_DURATION_SEC: 3900,
+  // Auftraege sind laenger als Notizen und werden waehrend des Sprechens
+  // formuliert. Die Denkpause mitten im Satz darf nicht als Ende gelten,
+  // daher grosszuegigere Stille-Schwelle als bei der Notiz.
+  AUFTRAG_MAX_DURATION_SEC: 300,
+  AUFTRAG_SILENCE_DURATION_MS: 5000,
 };
 
 const GEMINI_MODEL = "gemini-2.5-flash";
@@ -66,6 +74,7 @@ const CONFIG_KEY_PARTICIPANTS_PREFIX = "meeting_participants:";
 const CONFIG_KEY_DRIVE_CLIENT_ID = "drive_client_id";
 const CONFIG_KEY_DRIVE_TOKEN = "drive_token";
 const CONFIG_KEY_DRIVE_FOLDER_ID = "drive_folder_id";
+const CONFIG_KEY_DRIVE_AUFTRAG_FOLDER_ID = "drive_auftrag_folder_id";
 
 // ---------- IndexedDB ----------
 
@@ -160,9 +169,10 @@ const SCREENS = {
   home: "screen-home",
   idea: "screen-idea",
   meeting: "screen-meeting",
+  auftrag: "screen-auftrag",
 };
 const DEFAULT_SCREEN = "home";
-const REC_SCREENS = new Set(["idea", "meeting"]);
+const REC_SCREENS = new Set(["idea", "meeting", "auftrag"]);
 
 function currentScreenId() {
   const hash = (location.hash || "").replace(/^#/, "");
@@ -181,6 +191,7 @@ function showScreen(name) {
     renderHistory().catch((err) =>
       console.error("History-Render fehlgeschlagen:", err)
     );
+    pollAuftragStatusSoon();
   }
 }
 
@@ -192,9 +203,18 @@ const STATUS_ICONS = {
   transcribing: { icon: "\u21BB", cls: "is-running" },
   done: { icon: "\u2713", cls: "is-done" },
   error: { icon: "\u2717", cls: "is-error" },
+  // Nur Auftraege: Der Weg endet nicht beim Drive-Upload, sondern erst,
+  // wenn der Rechner im Buero den Auftrag abgearbeitet hat.
+  queued: { icon: "\u25CB", cls: "is-pending" },
+  working: { icon: "\u27F3", cls: "is-running" },
+  finished: { icon: "\u2713", cls: "is-done" },
+  failed: { icon: "\u2717", cls: "is-error" },
 };
 
-const KIND_LABEL = { idea: "Notiz", meeting: "Meeting" };
+// Statuswerte, bei denen sich ein weiterer Blick nach Drive noch lohnt.
+const AUFTRAG_OPEN_STATUS = new Set(["queued", "working"]);
+
+const KIND_LABEL = { idea: "Notiz", meeting: "Meeting", auftrag: "Auftrag" };
 
 function fmtTime(iso) {
   try {
@@ -215,6 +235,13 @@ function fmtDuration(sec) {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
+// Titel kommen aus der Gemini-Antwort, sind also nicht vertrauenswuerdig.
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[c]);
+}
+
 async function renderHistory() {
   const list = document.getElementById("history-list");
   if (!list) return;
@@ -224,14 +251,20 @@ async function renderHistory() {
   list.innerHTML = "";
   for (const item of items.slice(0, 20)) {
     const status = STATUS_ICONS[item.status] || STATUS_ICONS.pending;
+    const errored = item.status === "error" || item.status === "failed";
     const li = document.createElement("li");
-    li.className = "history-item" + (item.status === "error" ? " is-errored" : "");
+    li.className = "history-item" + (errored ? " is-errored" : "");
     li.dataset.id = String(item.id);
     li.tabIndex = 0;
+    // Beim Auftrag sagt der Titel mehr als die Aufnahmedauer.
+    const label = KIND_LABEL[item.kind] || item.kind || "";
+    const kindCell = item.kind === "auftrag" && item.title
+      ? `${label} &middot; ${esc(item.title)}`
+      : esc(label);
     li.innerHTML = `
       <span class="history-status ${status.cls}">${status.icon}</span>
       <span class="history-time">${fmtTime(item.createdAt)}</span>
-      <span class="history-kind">${KIND_LABEL[item.kind] || item.kind || ""}</span>
+      <span class="history-kind">${kindCell}</span>
       <span class="history-duration">${fmtDuration(item.durationSec)}</span>
     `;
     list.appendChild(li);
@@ -322,29 +355,44 @@ async function transcribeRecording(id) {
       participants: rec.participants,
     };
 
+    const promptText = rec.kind === "auftrag"
+      ? buildAuftragPrompt(meta)
+      : rec.kind === "idea"
+        ? buildIdeaPrompt(meta)
+        : buildMeetingPrompt(meta);
+    const isShort = rec.kind === "idea" || rec.kind === "auftrag";
+
     let markdown;
-    if (rec.kind === "idea" && rec.audioBlob.size <= INLINE_MAX_BYTES) {
+    if (isShort && rec.audioBlob.size <= INLINE_MAX_BYTES) {
       // Kurze Aufnahmen inline: ein Request statt Upload + Poll + Delete.
-      markdown = await generateContentInline(apiKey, GEMINI_MODEL, rec.audioBlob, buildIdeaPrompt(meta), { meeting: false });
+      markdown = await generateContentInline(apiKey, GEMINI_MODEL, rec.audioBlob, promptText, { meeting: false });
     } else {
       const displayName = `enkephalos-${rec.kind}-${rec.id}-${Date.now()}`;
       let file = await uploadAudio(apiKey, rec.audioBlob, displayName);
       fileName = file.name;
       file = await waitForFileActive(apiKey, file);
-      const promptText = rec.kind === "idea"
-        ? buildIdeaPrompt(meta)
-        : buildMeetingPrompt(meta);
       markdown = await generateContent(apiKey, GEMINI_MODEL, file, promptText, { meeting: rec.kind === "meeting" });
     }
 
-    await updateRecordingRecord(id, {
+    const patch = {
       status: "uploading",
       markdown,
       transcriptionModel: GEMINI_MODEL,
       transcribedAt: new Date().toISOString(),
       errorMessage: null,
-    });
-    toast(rec.kind === "idea" ? "Notiz transkribiert" : "Meeting transkribiert");
+    };
+    // Der Auftragstitel wird nicht getippt, sondern von Gemini aus dem
+    // Diktat gebildet. Er traegt den Dateinamen und die History-Zeile.
+    if (rec.kind === "auftrag") {
+      const m = markdown.match(/^titel:\s*(.+)$/m);
+      patch.title = (m ? m[1] : "").trim() || "ohne-titel";
+    }
+    await updateRecordingRecord(id, patch);
+    toast(
+      rec.kind === "auftrag" ? "Auftrag erfasst"
+        : rec.kind === "idea" ? "Notiz transkribiert"
+          : "Meeting transkribiert",
+    );
     // Drive-Upload nach erfolgreicher Transkription triggern.
     uploadRecordingToDrive(id).catch((err) =>
       console.error("Drive-Upload-Start fehlgeschlagen:", err),
@@ -475,18 +523,27 @@ async function uploadRecordingToDrive(id) {
     await updateRecordingRecord(id, { status: "uploading", errorMessage: null });
     await renderHistory();
 
-    // Folder-ID cachen.
-    let folderId = (await dbGet(STORE_CONFIG, CONFIG_KEY_DRIVE_FOLDER_ID))?.value;
+    // Auftraege gehen in einen eigenen Drive-Ordner: sync-inbox.ps1 raeumt
+    // die Inbox blind leer und wuerde sie sonst wegschieben, bevor
+    // process-auftraege.ps1 sie ueberhaupt sieht.
+    const isAuftrag = rec.kind === "auftrag";
+    const folderCfgKey = isAuftrag
+      ? CONFIG_KEY_DRIVE_AUFTRAG_FOLDER_ID
+      : CONFIG_KEY_DRIVE_FOLDER_ID;
+
+    let folderId = (await dbGet(STORE_CONFIG, folderCfgKey))?.value;
     if (!folderId) {
-      folderId = await ensureFolder(token);
-      await dbPut(STORE_CONFIG, { key: CONFIG_KEY_DRIVE_FOLDER_ID, value: folderId });
+      folderId = await ensureFolder(token, isAuftrag ? AUFTRAG_FOLDER_NAME : undefined);
+      await dbPut(STORE_CONFIG, { key: folderCfgKey, value: folderId });
     }
 
     const filename = buildFilename(rec);
     const uploaded = await uploadMarkdown(token, folderId, filename, rec.markdown);
 
     await updateRecordingRecord(id, {
-      status: "done",
+      // Beim Auftrag ist der Upload nicht das Ende, sondern die Uebergabe:
+      // erledigt ist er erst, wenn der Rechner im Buero ihn bearbeitet hat.
+      status: isAuftrag ? "queued" : "done",
       driveFileId: uploaded.id,
       driveFileName: uploaded.name,
       driveWebViewLink: uploaded.webViewLink || null,
@@ -497,7 +554,7 @@ async function uploadRecordingToDrive(id) {
       // erhoeht den Eviction-Druck. Das Markdown bleibt erhalten.
       audioBlob: null,
     });
-    toast("In Drive hochgeladen");
+    toast(isAuftrag ? "Auftrag uebergeben" : "In Drive hochgeladen");
   } catch (err) {
     console.error("Drive-Upload fehlgeschlagen:", err);
     const msg = String(err && err.message ? err.message : err);
@@ -540,6 +597,86 @@ async function processPendingDriveUploads() {
   }
 }
 
+// ---------- Auftragsstatus ----------
+
+// Der Rechner im Buero meldet den Bearbeitungsstand ueber den Dateinamen
+// zurueck (siehe scripts/process-auftraege.ps1). Wir fragen unsere eigenen
+// Auftragsdateien ab — die duerfen wir unter `drive.file` lesen, weil diese
+// App sie angelegt hat — und leiten den Status aus dem Namen ab.
+const AUFTRAG_SUFFIX_STATUS = [
+  [/--arbeit\.md$/, "working"],
+  [/--fertig\.md$/, "finished"],
+  [/--fehler\.md$/, "failed"],
+];
+
+function statusFromDriveName(name) {
+  for (const [re, status] of AUFTRAG_SUFFIX_STATUS) {
+    if (re.test(name || "")) return status;
+  }
+  return "queued";
+}
+
+let auftragPollRunning = false;
+
+async function refreshAuftragStatus() {
+  if (auftragPollRunning) return;
+  auftragPollRunning = true;
+  try {
+    const all = await dbGetAll(STORE_RECORDINGS);
+    const offen = all.filter(
+      (r) => r.kind === "auftrag" && r.driveFileId && AUFTRAG_OPEN_STATUS.has(r.status),
+    );
+    if (!offen.length) return;
+
+    const token = await getValidDriveToken();
+    if (!token) return;
+
+    let changed = false;
+    for (const rec of offen) {
+      try {
+        const meta = await getFileMeta(token, rec.driveFileId);
+        if (meta.trashed) {
+          await updateRecordingRecord(rec.id, {
+            status: "failed",
+            errorMessage: "Auftragsdatei in Drive geloescht",
+          });
+          changed = true;
+          continue;
+        }
+        const next = statusFromDriveName(meta.name);
+        if (next !== rec.status) {
+          await updateRecordingRecord(rec.id, { status: next, driveFileName: meta.name });
+          changed = true;
+          if (next === "finished") {
+            toast(`Auftrag erledigt: ${rec.title || ""}`.trim());
+          }
+        }
+      } catch (err) {
+        const msg = String(err && err.message ? err.message : err);
+        // 404: Datei endgueltig weg. Alles andere (Netz, Token) beim naechsten Lauf.
+        if (/\b404\b/.test(msg)) {
+          await updateRecordingRecord(rec.id, {
+            status: "failed",
+            errorMessage: "Auftragsdatei in Drive nicht mehr auffindbar",
+          });
+          changed = true;
+        } else {
+          console.debug("Auftragsstatus nicht abrufbar:", msg);
+        }
+      }
+    }
+    if (changed) await renderHistory();
+  } finally {
+    auftragPollRunning = false;
+  }
+}
+
+function pollAuftragStatusSoon() {
+  refreshAuftragStatus().catch((err) =>
+    console.debug("Auftragsstatus-Abfrage fehlgeschlagen:", err),
+  );
+}
+
 // ---------- Recording lifecycle ----------
 
 // currentRec = {
@@ -573,6 +710,13 @@ function resetIdeaUi() {
   if (stopBtn) stopBtn.disabled = true;
 }
 
+function resetAuftragUi() {
+  const hint = document.getElementById("auftrag-hint");
+  if (hint) hint.textContent = "Auftrag diktieren — einfach sprechen.";
+  const stopBtn = document.getElementById("auftrag-stop");
+  if (stopBtn) stopBtn.disabled = true;
+}
+
 function setWaveformLevel(rms) {
   // rms ~ 0..0.3 typisch; auf 0..1 mappen mit sanftem Clipping
   const clipped = Math.min(1, rms / 0.3);
@@ -594,17 +738,22 @@ function tickTimer() {
 async function startRecScreen(kind) {
   if (currentRec) return; // bereits aktiv
 
-  const isIdea = kind === "idea";
+  // Notiz und Auftrag laufen gleich: Stille beendet die Aufnahme, gespeichert
+  // wird ohne Rueckfrage. Nur das Meeting braucht den Titel-Dialog.
+  const isAuto = kind === "idea" || kind === "auftrag";
+  const maxDurationSec = kind === "idea"
+    ? DEFAULTS.IDEA_MAX_DURATION_SEC
+    : kind === "auftrag"
+      ? DEFAULTS.AUFTRAG_MAX_DURATION_SEC
+      : DEFAULTS.MEETING_MAX_DURATION_SEC;
+
   const opts = {
     mode: kind,
-    maxDurationSec: isIdea
-      ? DEFAULTS.IDEA_MAX_DURATION_SEC
-      : DEFAULTS.MEETING_MAX_DURATION_SEC,
+    maxDurationSec,
     onLevel: (rms) => setWaveformLevel(rms),
     onAutoStop: (reason) => {
-      // Auto-Stop: Idea speichert; Meeting sollte den Nutzer informieren.
       if (!currentRec) return;
-      if (kind === "idea") {
+      if (isAuto) {
         finalizeAndSave().catch((err) => {
           console.error(err);
           toast("Speichern fehlgeschlagen", { isError: true });
@@ -624,10 +773,12 @@ async function startRecScreen(kind) {
       }
     },
   };
-  if (isIdea) {
+  if (isAuto) {
     opts.silence = {
       thresholdRms: DEFAULTS.IDEA_SILENCE_THRESHOLD,
-      durationMs: DEFAULTS.IDEA_SILENCE_DURATION_MS,
+      durationMs: kind === "auftrag"
+        ? DEFAULTS.AUFTRAG_SILENCE_DURATION_MS
+        : DEFAULTS.IDEA_SILENCE_DURATION_MS,
     };
   }
 
@@ -648,6 +799,10 @@ async function startRecScreen(kind) {
       if (note) note.textContent = "Bildschirm darf dunkel, aber nicht aus.";
       tickTimer();
       currentRec.timerId = setInterval(tickTimer, 250);
+    } else if (kind === "auftrag") {
+      resetAuftragUi();
+      const auftragStop = document.getElementById("auftrag-stop");
+      if (auftragStop) auftragStop.disabled = false;
     } else {
       resetIdeaUi();
       const ideaStop = document.getElementById("idea-stop");
@@ -701,7 +856,11 @@ async function finalizeAndSave(titleFromUser = null, participantsFromUser = null
   }
 
   const newId = await dbAdd(STORE_RECORDINGS, entry);
-  toast(rec.kind === "idea" ? "Notiz gespeichert" : "Meeting gespeichert");
+  toast(
+    rec.kind === "auftrag" ? "Auftrag aufgenommen"
+      : rec.kind === "idea" ? "Notiz gespeichert"
+        : "Meeting gespeichert",
+  );
 
   // Fire-and-forget Transkription.
   transcribeRecording(Number(newId)).catch((err) =>
@@ -709,6 +868,7 @@ async function finalizeAndSave(titleFromUser = null, participantsFromUser = null
   );
 
   if (rec.kind === "idea") resetIdeaUi();
+  else if (rec.kind === "auftrag") resetAuftragUi();
   else resetMeetingUi();
 
   if (location.hash.replace(/^#/, "") !== "home") {
@@ -736,6 +896,7 @@ function discardAndGoHome() {
   releaseWakeLock();
   resetMeetingUi();
   resetIdeaUi();
+  resetAuftragUi();
   if (location.hash.replace(/^#/, "") !== "home") {
     location.hash = "home";
   }
@@ -765,9 +926,11 @@ function releaseWakeLock() {
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && currentRec && !wakeLock) {
-    requestWakeLock();
-  }
+  if (document.visibilityState !== "visible") return;
+  if (currentRec && !wakeLock) requestWakeLock();
+  // App wieder im Vordergrund: haeufigster Moment, in dem sich am
+  // Auftragsstatus zwischenzeitlich etwas getan hat.
+  if (!currentRec) pollAuftragStatusSoon();
 });
 
 // ---------- Title modal ----------
@@ -879,6 +1042,7 @@ function onHashChange() {
     releaseWakeLock();
     resetMeetingUi();
     resetIdeaUi();
+    resetAuftragUi();
   }
 
   showScreen(newScreen);
@@ -906,6 +1070,19 @@ function bindButtons() {
     ideaStopBtn.addEventListener("click", () => {
       if (!currentRec || currentRec.kind !== "idea") return;
       ideaStopBtn.disabled = true;
+      finalizeAndSave().catch((err) => {
+        console.error(err);
+        toast("Speichern fehlgeschlagen", { isError: true });
+        discardAndGoHome();
+      });
+    });
+  }
+
+  const auftragStopBtn = document.getElementById("auftrag-stop");
+  if (auftragStopBtn) {
+    auftragStopBtn.addEventListener("click", () => {
+      if (!currentRec || currentRec.kind !== "auftrag") return;
+      auftragStopBtn.disabled = true;
       finalizeAndSave().catch((err) => {
         console.error(err);
         toast("Speichern fehlgeschlagen", { isError: true });
@@ -961,11 +1138,27 @@ async function showRecording(id) {
 
   mdCurrentId = id;
   titleEl.textContent = rec.title
-    || (rec.kind === "idea" ? "Notiz" : "Meeting")
+    || (KIND_LABEL[rec.kind] || "Aufnahme")
     + " \u00b7 " + fmtTime(rec.createdAt);
 
+  // Beim Auftrag interessiert vor allem, wie weit die Bearbeitung ist.
+  const AUFTRAG_HINWEIS = {
+    queued: "Uebergeben. Der Rechner im Buero holt den Auftrag beim naechsten Durchlauf.",
+    working: "Wird gerade bearbeitet.",
+    finished: "Erledigt. Das Ergebnis liegt in Enkephalos/inbox/.",
+  };
+
   body.classList.remove("is-error");
-  if (rec.status === "done" && rec.markdown) {
+  if (rec.kind === "auftrag" && AUFTRAG_HINWEIS[rec.status]) {
+    body.textContent = AUFTRAG_HINWEIS[rec.status]
+      + "\n\n" + (rec.markdown || "");
+  } else if (rec.kind === "auftrag" && rec.status === "failed") {
+    body.classList.add("is-error");
+    body.textContent = "Bearbeitung fehlgeschlagen"
+      + (rec.errorMessage ? `: ${rec.errorMessage}` : ".")
+      + "\n\nEine Fehlernotiz mit dem urspruenglichen Auftrag liegt in Enkephalos/inbox/."
+      + "\n\n" + (rec.markdown || "");
+  } else if (rec.status === "done" && rec.markdown) {
     body.textContent = rec.markdown;
   } else if (rec.status === "transcribing") {
     body.textContent = "Transkription laeuft \u2026";
@@ -1080,6 +1273,15 @@ async function init() {
       console.error("Startup-Uploads fehlgeschlagen:", err),
     );
   }
+
+  // Auftragsstatus nachfuehren. Die Abfrage steigt sofort aus, wenn kein
+  // Auftrag offen ist — der Intervall kostet dann praktisch nichts.
+  pollAuftragStatusSoon();
+  setInterval(() => {
+    if (document.visibilityState === "visible" && !currentRec) {
+      pollAuftragStatusSoon();
+    }
+  }, 60000);
 
   const initial = currentScreenId();
   showScreen(initial);

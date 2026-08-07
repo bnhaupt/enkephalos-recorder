@@ -8,6 +8,7 @@ const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3";
 const DEFAULT_FOLDER_NAME = "Enkephalos-Inbox";
+export const AUFTRAG_FOLDER_NAME = "Enkephalos-Auftraege";
 
 async function readErr(res) {
   try { return (await res.text()).slice(0, 600); } catch { return ""; }
@@ -140,6 +141,23 @@ export async function uploadMarkdown(token, folderId, filename, markdown) {
   return await res.json(); // { id, name, webViewLink }
 }
 
+// ---------- Statusabfrage ----------
+
+// Das Laptop-Skript meldet den Bearbeitungsstand einer Auftragsdatei ueber
+// deren Namen zurueck (`--arbeit`, `--fertig`, `--fehler`). Es benennt dabei
+// serverseitig um, die Datei-ID bleibt also erhalten — und eine Datei, die
+// diese App selbst angelegt hat, darf sie unter dem Scope `drive.file`
+// weiterhin abfragen. Ordner-IDs waeren hier kein gangbarer Weg: Ordner, die
+// das Skript anlegt, sind fuer die App unsichtbar.
+export async function getFileMeta(token, fileId) {
+  const res = await fetch(
+    `${DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=id,name,trashed`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok) throw new Error(`Drive-Get ${res.status}: ${await readErr(res)}`);
+  return await res.json(); // { id, name, trashed }
+}
+
 // ---------- Filename builder ----------
 
 export function slugify(s) {
@@ -165,5 +183,6 @@ export function buildFilename(rec) {
     `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   if (rec.kind === "idea") return `${ts}-notiz.md`;
   const slug = slugify(rec.title || "") || "ohne-titel";
+  if (rec.kind === "auftrag") return `${ts}-auftrag-${slug}.md`;
   return `${ts}-meeting-${slug}.md`;
 }

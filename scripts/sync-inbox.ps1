@@ -18,7 +18,9 @@
 $RcloneExe    = "$env:LOCALAPPDATA\Microsoft\WinGet\Links\rclone.exe"
 $RcloneRemote = "gdrive:Enkephalos-Inbox"
 $VaultInbox   = "$env:USERPROFILE\OneDrive\Enkephalos\inbox"
-$LogFile      = "$env:USERPROFILE\OneDrive\Enkephalos\sync-inbox.log"
+# 21.07.2026: Log aus dem Vault-Hauptverzeichnis herausgenommen (Ablagesystem-Umstellung).
+# Der Vault enthaelt nur noch Inhalte, keine Betriebsprotokolle.
+$LogFile      = "$env:USERPROFILE\OneDrive\05_DEV\voice-pipeline\logs\sync-inbox.log"
 
 # ---------- Ausfuehrung ----------
 

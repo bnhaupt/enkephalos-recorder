@@ -4,6 +4,9 @@ pwa/config.js
 # Claude Code lokale Settings
 .claude/settings.local.json
 
+# Betriebsprotokolle der Laptop-Skripte
+logs/
+
 # Python
 __pycache__/
 

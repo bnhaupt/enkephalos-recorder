@@ -41,6 +41,14 @@ Werkzeuge der unbeaufsichtigte Lauf bekommt.
 Alle Profile lesen zusaetzlich `OneDrive/03_RESOURCES/Leitlinien-Archiv/` —
 bei Leitlinienfragen zaehlt die Fassung, die hier tatsaechlich gilt.
 
+**Was die Einstufung entscheidet, ist das Ergebnis, nicht die Taetigkeit.**
+"Such die neuesten Artikel und mach mir daraus ein Slide" ist `dokument`, nicht
+`recherche` — die Folie ist das Ergebnis, die Recherche nur der Weg. Nur
+`dokument` darf Dateien erzeugen; recherchieren darf es ebenfalls. Diese
+Vorrangregel steht im Gemini-Prompt, weil eine Fehleinstufung den Auftrag
+unerfuellbar macht: ein als `recherche` eingestufter Folienauftrag liefert am
+Ende keine Folie.
+
 > **Fallstrick, der einmal zugeschlagen hat:** Jedes Profil muss seine
 > Werkzeuge ausdruecklich auflisten. `--permission-mode acceptEdits` genehmigt
 > nur Datei-Aenderungen automatisch; `WebSearch` und `WebFetch` verlangen

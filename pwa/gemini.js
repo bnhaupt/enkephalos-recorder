@@ -303,11 +303,16 @@ Wo das Diktat den Umfang offenlaesst, setze eine ausdrueckliche, benannte Annahm
 
 Wenn das Audio keinen erkennbaren Auftrag enthaelt: schreibe unter "Arbeitsauftrag" exakt "Kein Auftrag erkennbar." und lasse das Transkript fuer sich sprechen.
 
-Bestimme die Auftragsart (Feld kind), im Zweifel "recherche". Sie steuert, worauf der Arbeitsauftrag zugeschnitten wird:
+Bestimme die Auftragsart (Feld kind). Sie entscheidet, welche Werkzeuge der bearbeitende Assistent bekommt — eine Fehleinstufung macht den Auftrag unerfuellbar.
+
+VORRANGREGEL: Entscheidend ist, was am Ende herauskommen soll, nicht welche Taetigkeit dorthin fuehrt. Verlangt das Diktat eine Datei — Folie, Praesentation, Brief, Bericht, Konzeptpapier —, dann ist kind IMMER "dokument", auch wenn dafuer zuerst recherchiert oder im eigenen Material gesucht werden muss. Nur "dokument" darf Dateien erzeugen; recherchieren darf es ebenfalls. Eine als "recherche" eingestufte Folienanforderung liefert am Ende keine Folie.
+Beispiel: "Such die neuesten Artikel zu X und mach mir daraus ein Slide" ist "dokument", nicht "recherche" — das Slide ist das Ergebnis, die Recherche nur der Weg.
+
+Ohne verlangte Datei entscheidet der Gegenstand, im Zweifel "recherche":
 - "recherche" — Literatur, Evidenzlage, Leitlinien, Ueberblick. Schaerfe die Fragestellung, benenne den Suchraum, verlange Quellen mit Jahr und Evidenzlevel sowie eine ausdrueckliche Aussage dort, wo die Evidenz duenn oder widerspruechlich ist.
 - "klinisch" — konkrete Fachfrage aus der Versorgung (Dosierung, Kontraindikation, Differentialdiagnose). Verlange eine kurze belegte Antwort und benenne den Patientenkontext, soweit gesagt. Kuerze ausdruecklich vorgeben.
 - "vault" — bezieht sich auf eigene Notizen, Protokolle, Projekte ("meine letzten Protokolle", "was hatten wir dazu festgehalten"). Benenne so genau wie moeglich, welches Material gemeint ist und welcher Zeitraum, und was daraus entstehen soll.
-- "dokument" — Brief, Bericht, Konzept, Praesentation. Benenne Textsorte, Adressat, Umfang und Tonfall, soweit aus dem Diktat ableitbar.
+- "dokument" — Brief, Bericht, Konzept, Praesentation, einzelne Folie. Benenne Textsorte, Adressat, Umfang und Tonfall, soweit aus dem Diktat ableitbar. Wo dem Dokument eine Recherche vorausgeht, gehoert auch die in den Arbeitsauftrag — mit demselben Quellenanspruch wie bei "recherche".
 
 Das Feld titel ist eine knappe Sachbezeichnung, hoechstens sechs Woerter, ohne Artikel am Anfang. Daraus wird ein Dateiname gebildet.
 

@@ -188,6 +188,7 @@ function showScreen(name) {
     el.setAttribute("aria-hidden", active ? "false" : "true");
   }
   if (name === "home") {
+    renderDateline();
     renderHistory().catch((err) =>
       console.error("History-Render fehlgeschlagen:", err)
     );
@@ -195,20 +196,40 @@ function showScreen(name) {
   }
 }
 
+// Datumszeile im Kopf. Ordnet die Historie darunter zeitlich ein, ohne dass
+// jede Zeile das Datum wiederholen muesste.
+function renderDateline() {
+  const el = document.getElementById("home-date");
+  if (!el) return;
+  try {
+    el.textContent = new Date().toLocaleDateString("de-DE", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  } catch {
+    el.textContent = "";
+  }
+}
+
 // ---------- History-Renderer ----------
 
+// Zustand wird ueber die Form angezeigt (hohler Ring, offener Ring, voller
+// Punkt, Quadrat), nicht ueber Ampelfarben \u2014 das SK-System untersagt
+// Erfolg/Warnung-Semantik durch Farbe, und im Augenwinkel ist Form ohnehin
+// das robustere Signal. Das Label traegt die Bedeutung fuer Screenreader.
 const STATUS_ICONS = {
-  pending: { icon: "\u2026", cls: "is-pending" },
-  uploading: { icon: "\u21E7", cls: "is-running" },
-  transcribing: { icon: "\u21BB", cls: "is-running" },
-  done: { icon: "\u2713", cls: "is-done" },
-  error: { icon: "\u2717", cls: "is-error" },
+  pending: { cls: "is-pending", label: "wartet" },
+  uploading: { cls: "is-running", label: "wird hochgeladen" },
+  transcribing: { cls: "is-running", label: "wird transkribiert" },
+  done: { cls: "is-done", label: "fertig" },
+  error: { cls: "is-error", label: "Fehler" },
   // Nur Auftraege: Der Weg endet nicht beim Drive-Upload, sondern erst,
   // wenn der Rechner im Buero den Auftrag abgearbeitet hat.
-  queued: { icon: "\u25CB", cls: "is-pending" },
-  working: { icon: "\u27F3", cls: "is-running" },
-  finished: { icon: "\u2713", cls: "is-done" },
-  failed: { icon: "\u2717", cls: "is-error" },
+  queued: { cls: "is-pending", label: "uebergeben, wartet" },
+  working: { cls: "is-running", label: "wird bearbeitet" },
+  finished: { cls: "is-done", label: "erledigt" },
+  failed: { cls: "is-error", label: "fehlgeschlagen" },
 };
 
 // Statuswerte, bei denen sich ein weiterer Blick nach Drive noch lohnt.
@@ -242,6 +263,24 @@ function esc(s) {
   })[c]);
 }
 
+// Was ein zweiter Versuch bei diesem Datensatz ueberhaupt bewirken wuerde.
+// Modal und Listenzeile muessen sich hier einig sein, sonst bietet die eine
+// Stelle etwas an, das die andere fuer sinnlos haelt.
+function retryTarget(rec) {
+  if (!rec) return null;
+  if (rec.markdown && !rec.driveFileId) return "upload";
+  if (rec.status === "error" || (rec.status === "pending" && !rec.markdown)) return "transcribe";
+  return null;
+}
+
+function runRetry(id, target) {
+  if (target === "upload") {
+    uploadRecordingToDrive(id).catch((err) => console.error(err));
+  } else if (target === "transcribe") {
+    transcribeRecording(id).catch((err) => console.error(err));
+  }
+}
+
 async function renderHistory() {
   const list = document.getElementById("history-list");
   if (!list) return;
@@ -252,6 +291,9 @@ async function renderHistory() {
   for (const item of items.slice(0, 20)) {
     const status = STATUS_ICONS[item.status] || STATUS_ICONS.pending;
     const errored = item.status === "error" || item.status === "failed";
+    // Fehlerzeilen sind die einzigen, die etwas verlangen — der Griff steht
+    // deshalb direkt in der Zeile statt hinter dem Modal.
+    const retry = retryTarget(item);
     const li = document.createElement("li");
     li.className = "history-item" + (errored ? " is-errored" : "");
     li.dataset.id = String(item.id);
@@ -262,10 +304,13 @@ async function renderHistory() {
       ? `${label} &middot; ${esc(item.title)}`
       : esc(label);
     li.innerHTML = `
-      <span class="history-status ${status.cls}">${status.icon}</span>
+      <span class="history-status ${status.cls}" role="img" aria-label="${esc(status.label)}"></span>
       <span class="history-time">${fmtTime(item.createdAt)}</span>
       <span class="history-kind">${kindCell}</span>
       <span class="history-duration">${fmtDuration(item.durationSec)}</span>
+      ${retry ? `<button type="button" class="history-retry" data-retry="${retry}">${
+        retry === "upload" ? "Drive-Upload wiederholen" : "Erneut transkribieren"
+      }</button>` : ""}
     `;
     list.appendChild(li);
   }
@@ -708,6 +753,9 @@ function resetIdeaUi() {
   if (hint) hint.textContent = "Aufnahme laeuft \u2014 einfach sprechen.";
   const stopBtn = document.getElementById("idea-stop");
   if (stopBtn) stopBtn.disabled = true;
+  const timerEl = document.getElementById("idea-timer");
+  if (timerEl) timerEl.textContent = "00:00";
+  setWaveformLevel(0);
 }
 
 function resetAuftragUi() {
@@ -715,6 +763,9 @@ function resetAuftragUi() {
   if (hint) hint.textContent = "Auftrag diktieren — einfach sprechen.";
   const stopBtn = document.getElementById("auftrag-stop");
   if (stopBtn) stopBtn.disabled = true;
+  const timerEl = document.getElementById("auftrag-timer");
+  if (timerEl) timerEl.textContent = "00:00";
+  setWaveformLevel(0);
 }
 
 function setWaveformLevel(rms) {
@@ -723,9 +774,18 @@ function setWaveformLevel(rms) {
   document.documentElement.style.setProperty("--level", clipped.toFixed(3));
 }
 
+// Jeder Aufnahmemodus hat jetzt einen eigenen Timer. Bei Notiz und Auftrag
+// zaehlt er gegen eine harte Obergrenze (2 bzw. 5 Min) — genau dort ist die
+// verstrichene Zeit die Information, die fehlte.
+const TIMER_IDS = {
+  meeting: "meeting-timer",
+  idea: "idea-timer",
+  auftrag: "auftrag-timer",
+};
+
 function tickTimer() {
   if (!currentRec) return;
-  const timerEl = document.getElementById("meeting-timer");
+  const timerEl = document.getElementById(TIMER_IDS[currentRec.kind] || "meeting-timer");
   if (!timerEl) return;
   const sec = Math.floor((performance.now() - currentRec.startTs) / 1000);
   const h = Math.floor(sec / 3600);
@@ -797,8 +857,6 @@ async function startRecScreen(kind) {
       const note = document.getElementById("meeting-note");
       if (stopBtn) stopBtn.disabled = false;
       if (note) note.textContent = "Bildschirm darf dunkel, aber nicht aus.";
-      tickTimer();
-      currentRec.timerId = setInterval(tickTimer, 250);
     } else if (kind === "auftrag") {
       resetAuftragUi();
       const auftragStop = document.getElementById("auftrag-stop");
@@ -808,6 +866,9 @@ async function startRecScreen(kind) {
       const ideaStop = document.getElementById("idea-stop");
       if (ideaStop) ideaStop.disabled = false;
     }
+
+    tickTimer();
+    currentRec.timerId = setInterval(tickTimer, 250);
 
     // Request wake lock wo verfuegbar (still optional, Phase 5 haertet)
     requestWakeLock();
@@ -1097,7 +1158,15 @@ function bindButtons() {
       const li = ev.target.closest(".history-item");
       if (!li) return;
       const id = Number(li.dataset.id);
-      if (id) showRecording(id);
+      if (!id) return;
+      // Der Griff in der Zeile darf nicht zusaetzlich das Modal oeffnen.
+      const retryBtn = ev.target.closest(".history-retry");
+      if (retryBtn) {
+        ev.stopPropagation();
+        runRetry(id, retryBtn.dataset.retry);
+        return;
+      }
+      showRecording(id);
     });
   }
 
@@ -1169,18 +1238,15 @@ async function showRecording(id) {
     body.textContent = "Noch nicht transkribiert.";
   }
 
-  const needsUpload = !!rec.markdown && !rec.driveFileId;
-  const canRetry = rec.status === "error" || needsUpload || (rec.status === "pending" && !rec.markdown);
-  if (actions) actions.hidden = !canRetry;
+  const target = retryTarget(rec);
+  if (actions) actions.hidden = !target;
   if (retry) {
-    retry.textContent = needsUpload ? "Drive-Upload wiederholen" : "Erneut transkribieren";
+    retry.textContent = target === "upload"
+      ? "Drive-Upload wiederholen"
+      : "Erneut transkribieren";
     retry.onclick = () => {
       closeMarkdownModal();
-      if (needsUpload) {
-        uploadRecordingToDrive(id).catch((err) => console.error(err));
-      } else {
-        transcribeRecording(id).catch((err) => console.error(err));
-      }
+      runRetry(id, target);
     };
   }
   modal.hidden = false;

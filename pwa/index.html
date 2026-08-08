@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#0a0a0a" />
+  <meta name="theme-color" content="#161310" />
   <title>Enkephalos Recorder</title>
 
   <link rel="manifest" href="./manifest.json" />
@@ -17,7 +17,8 @@
 
     <section id="screen-home" class="screen">
       <header class="screen-header">
-        <h1>Enkephalos Recorder</h1>
+        <h1>Enkephalos</h1>
+        <span id="home-date" class="dateline"></span>
       </header>
 
       <div id="drive-banner" class="drive-banner" hidden>
@@ -25,26 +26,24 @@
         <button type="button" id="drive-connect-btn" class="btn-primary btn-small">Verbinden</button>
       </div>
 
-      <div class="mode-grid">
-        <a class="mode-btn" href="#idea" data-mode="idea">
-          <span class="mode-btn-label">Notiz</span>
-          <span class="mode-btn-hint">Stopp manuell oder nach 3s Stille &middot; max. 2 Min</span>
-        </a>
-        <a class="mode-btn" href="#meeting" data-mode="meeting">
-          <span class="mode-btn-label">Meeting</span>
-          <span class="mode-btn-hint">Start / Stopp manuell &middot; bis 60 Min</span>
-        </a>
-        <a class="mode-btn" href="#auftrag" data-mode="auftrag">
-          <span class="mode-btn-label">Auftrag</span>
-          <span class="mode-btn-hint">Wird auf dem Rechner im Buero bearbeitet &middot; max. 5 Min</span>
-        </a>
-      </div>
-
+      <!-- Wird gelesen, nicht beruehrt: gehoert nach oben. -->
       <section class="history">
         <h2>Zuletzt</h2>
         <ul id="history-list" class="history-list" aria-live="polite"></ul>
         <p id="history-empty" class="history-empty">Noch keine Aufnahmen.</p>
       </section>
+
+      <!-- Wird beruehrt, nicht gelesen: gehoert in die Daumenzone. -->
+      <div class="capture">
+        <div class="mode-pills">
+          <a class="mode-pill" href="#meeting">Meeting</a>
+          <a class="mode-pill" href="#auftrag">Auftrag</a>
+        </div>
+        <a class="mode-ring" href="#idea">
+          <span class="mode-ring-label">Notiz</span>
+          <span class="mode-ring-hint">Tippen</span>
+        </a>
+      </div>
     </section>
 
     <section id="screen-meeting" class="screen" aria-hidden="true">
@@ -53,20 +52,13 @@
       </header>
 
       <div class="rec-body">
-        <div class="rec-indicator" aria-hidden="true">
-          <span class="rec-dot"></span>
-          <span class="rec-label">REC</span>
+        <div class="rec-main">
+          <p class="eyebrow">Aufnahme &middot; Meeting</p>
+          <div id="meeting-timer" class="rec-timer">00:00</div>
+          <div class="level-bar" aria-hidden="true"><i></i></div>
         </div>
 
-        <div id="meeting-timer" class="rec-timer">00:00</div>
-
-        <div class="waveform" aria-hidden="true">
-          <span></span><span></span><span></span><span></span><span></span>
-          <span></span><span></span><span></span><span></span><span></span>
-          <span></span><span></span><span></span><span></span><span></span>
-        </div>
-
-        <button type="button" id="meeting-stop" class="stop-btn" disabled>Stopp</button>
+        <button type="button" id="meeting-stop" class="ring-btn" disabled>Stopp</button>
         <p class="rec-note" id="meeting-note">Mikrofon wird initialisiert &hellip;</p>
       </div>
     </section>
@@ -76,10 +68,15 @@
         <a class="back-link" href="#home" aria-label="Abbrechen">&larr; Abbrechen</a>
       </header>
 
-      <div class="rec-body idea-body">
-        <div class="pulse" aria-hidden="true"></div>
-        <p id="idea-hint" class="idea-hint">Mikrofon wird initialisiert &hellip;</p>
-        <button type="button" id="idea-stop" class="stop-btn" disabled>Stopp</button>
+      <div class="rec-body">
+        <div class="rec-main">
+          <p class="eyebrow">Aufnahme &middot; Notiz</p>
+          <div id="idea-timer" class="rec-timer">00:00</div>
+          <div class="level-bar" aria-hidden="true"><i></i></div>
+          <p id="idea-hint" class="idea-hint">Mikrofon wird initialisiert &hellip;</p>
+        </div>
+
+        <button type="button" id="idea-stop" class="ring-btn" disabled>Stopp</button>
         <p class="idea-subhint">Stoppt auch automatisch nach 3 Sekunden Stille.</p>
       </div>
     </section>
@@ -89,10 +86,15 @@
         <a class="back-link" href="#home" aria-label="Abbrechen">&larr; Abbrechen</a>
       </header>
 
-      <div class="rec-body idea-body">
-        <div class="pulse" aria-hidden="true"></div>
-        <p id="auftrag-hint" class="idea-hint">Mikrofon wird initialisiert &hellip;</p>
-        <button type="button" id="auftrag-stop" class="stop-btn" disabled>Stopp</button>
+      <div class="rec-body">
+        <div class="rec-main">
+          <p class="eyebrow">Aufnahme &middot; Auftrag</p>
+          <div id="auftrag-timer" class="rec-timer">00:00</div>
+          <div class="level-bar" aria-hidden="true"><i></i></div>
+          <p id="auftrag-hint" class="idea-hint">Mikrofon wird initialisiert &hellip;</p>
+        </div>
+
+        <button type="button" id="auftrag-stop" class="ring-btn" disabled>Stopp</button>
         <p class="idea-subhint">Stoppt auch automatisch nach 5 Sekunden Stille.</p>
       </div>
     </section>

@@ -59,6 +59,11 @@ $LockStaleMinutes = 45
 # Status weiterhin ablesen kann. Nach dieser Frist werden sie aufgeraeumt.
 $KeepFertigDays = 14
 
+# Was aus dem Arbeitsverzeichnis nach OneDrive wandert. Positivliste, nicht
+# Ausschlussliste: Der Lauf legt sich zum Bauen einer .pptx Hilfsskripte an,
+# und die haben in 00_INBOX nichts verloren.
+$ArtefaktEndungen = @(".pptx", ".docx", ".xlsx", ".pdf", ".png", ".jpg", ".svg")
+
 # ---------- Ausfuehrung ----------
 
 $ErrorActionPreference = "Stop"
@@ -363,12 +368,21 @@ $auftragText
 
             # Erzeugte Binaerartefakte (nur beim Profil `dokument`) wandern
             # nach OneDrive — Format entscheidet ueber Ablage, nicht Thema.
-            $artefakte = @(Get-ChildItem -LiteralPath $workDir -File |
-                Where-Object { $_.Name -notlike "_*" -and $_.Name -ne $name -and $_.Extension -ne ".md" })
+            $alleDateien = @(Get-ChildItem -LiteralPath $workDir -File |
+                Where-Object { $_.Name -notlike "_*" -and $_.Name -ne $name })
+            $artefakte = @($alleDateien |
+                Where-Object { $ArtefaktEndungen -contains $_.Extension.ToLower() })
             foreach ($a in $artefakte) {
                 $ziel = Join-Path $OneDriveInbox $a.Name
                 Move-Item -LiteralPath $a.FullName -Destination $ziel -Force
                 Write-Log "Artefakt -> 00_INBOX: $($a.Name)"
+            }
+            # Was liegen bleibt, wird mit dem Arbeitsverzeichnis verworfen.
+            # Nicht stillschweigend: sonst faellt nie auf, wenn ein Lauf sein
+            # Ergebnis in einem Format ablegt, das die Liste nicht kennt.
+            $verworfen = @($alleDateien | Where-Object { $artefakte -notcontains $_ })
+            if ($verworfen.Count -gt 0) {
+                Write-Log "Nicht uebernommen (kein Artefakt-Format): $(($verworfen | ForEach-Object { $_.Name }) -join ', ')"
             }
 
             Set-AuftragStatus -CurrentName $claimed -NewName "$stem--fertig.md" | Out-Null

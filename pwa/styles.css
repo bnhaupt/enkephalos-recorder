@@ -172,11 +172,12 @@ main#app {
    Sie wird gelesen, nicht beruehrt, und gehoert damit dorthin, wo die
    Augen zuerst hinsehen und der Daumen nicht hinreicht. */
 
+/* Nach Inhalt bemessen, nicht den Rest fuellend: die Erfassung unten ist
+   das Ziel des Bildschirms, die Historie nur die Quittung. Begrenzt wird
+   ueber HISTORY_ON_HOME in app.js, nicht ueber Scrollen. */
 .history {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -300,6 +301,7 @@ main#app {
    Form: Kreis gegen Rechteck, 216px gegen 64px. */
 
 .capture {
+  margin-top: auto;   /* drueckt die Erfassung an den unteren Rand */
   display: flex;
   flex-direction: column;
   gap: 1.25rem;

@@ -5,7 +5,7 @@
 // - Update-Prompt bei neuer Version
 // - Offline-Fallback
 
-const CACHE_NAME = "enkephalos-recorder-v20";
+const CACHE_NAME = "enkephalos-recorder-v21";
 const APP_SHELL = [
   "./index.html",
   "./app.js",
@@ -57,8 +57,14 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Produktion: Cache-First
+  // Produktion: Cache-First — aber ausschliesslich aus dem Cache DIESER
+  // Version. caches.match(req) ohne cacheName durchsucht alle Caches des
+  // Origins und liefert den ersten Treffer. Solange der alte Cache noch
+  // existiert, konnte dabei neues index.html mit altem styles.css
+  // kombiniert werden: das Markup kannte .mode-ring, das Stylesheet nicht,
+  // und die Startseite fiel auf unformatierte Links zurueck.
   event.respondWith(
-    caches.match(req).then((cached) => cached || fetch(req))
+    caches.match(req, { cacheName: CACHE_NAME })
+      .then((cached) => cached || fetch(req))
   );
 });

@@ -237,6 +237,8 @@ const AUFTRAG_OPEN_STATUS = new Set(["queued", "working"]);
 
 const KIND_LABEL = { idea: "Notiz", meeting: "Meeting", auftrag: "Auftrag" };
 
+const HISTORY_ON_HOME = 4;
+
 function fmtTime(iso) {
   try {
     return new Date(iso).toLocaleTimeString("de-DE", {
@@ -288,7 +290,10 @@ async function renderHistory() {
   items.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 
   list.innerHTML = "";
-  for (const item of items.slice(0, 20)) {
+  // Nur die letzten vier. Der Startbildschirm beantwortet die Frage "ist das
+  // von eben durch?" — dafuer reichen vier Zeilen. Zwanzig haben die
+  // Erfassung aus dem Bild geschoben.
+  for (const item of items.slice(0, HISTORY_ON_HOME)) {
     const status = STATUS_ICONS[item.status] || STATUS_ICONS.pending;
     const errored = item.status === "error" || item.status === "failed";
     // Fehlerzeilen sind die einzigen, die etwas verlangen — der Griff steht

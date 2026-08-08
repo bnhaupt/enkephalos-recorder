@@ -37,6 +37,24 @@ const MEETING_GENERATION_CONFIG = {
   thinkingConfig: { thinkingBudget: -1 },
 };
 
+// Auftrag: Das Diktat wird nicht nur transkribiert, sondern in einen
+// selbsttragenden Arbeitsauftrag umformuliert. Die Abwaegung, was noch
+// Arbeitsweise ist und was schon Gegenstand waere, ist eine Urteilsfrage —
+// dafuer Thinking aktiv. Die Sekunden kosten nichts: der Rechner im Buero
+// holt den Auftrag ohnehin erst beim naechsten Fuenf-Minuten-Durchlauf ab.
+const AUFTRAG_GENERATION_CONFIG = {
+  temperature: 0,
+  topP: 0.95,
+  maxOutputTokens: 16384,
+  responseMimeType: "text/plain",
+  thinkingConfig: { thinkingBudget: -1 },
+};
+
+const CONFIG_BY_KIND = {
+  meeting: MEETING_GENERATION_CONFIG,
+  auftrag: AUFTRAG_GENERATION_CONFIG,
+};
+
 async function readErr(res) {
   try {
     const txt = await res.text();
@@ -129,13 +147,13 @@ export async function deleteFile(apiKey, fileName) {
   }
 }
 
-async function callGenerate(apiKey, model, parts, meeting) {
+async function callGenerate(apiKey, model, parts, kind) {
   const url =
     `${BASE}/v1beta/models/${encodeURIComponent(model)}:generateContent` +
     `?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents: [{ parts }],
-    generationConfig: meeting ? MEETING_GENERATION_CONFIG : GENERATION_CONFIG,
+    generationConfig: CONFIG_BY_KIND[kind] || GENERATION_CONFIG,
     safetySettings: SAFETY_SETTINGS,
   };
   const res = await fetch(url, {
@@ -161,11 +179,11 @@ async function callGenerate(apiKey, model, parts, meeting) {
   return text;
 }
 
-export async function generateContent(apiKey, model, file, promptText, { meeting = false } = {}) {
+export async function generateContent(apiKey, model, file, promptText, { kind = "idea" } = {}) {
   return callGenerate(apiKey, model, [
     { file_data: { file_uri: file.uri, mime_type: file.mimeType } },
     { text: promptText },
-  ], meeting);
+  ], kind);
 }
 
 function blobToBase64(blob) {
@@ -179,12 +197,12 @@ function blobToBase64(blob) {
 
 // Fuer kurze Aufnahmen: Audio als inline_data direkt im generateContent-Call.
 // Spart Files-API-Upload, ACTIVE-Polling und Delete (3 Requests + Warteschleife).
-export async function generateContentInline(apiKey, model, blob, promptText, { meeting = false } = {}) {
+export async function generateContentInline(apiKey, model, blob, promptText, { kind = "idea" } = {}) {
   const data = await blobToBase64(blob);
   return callGenerate(apiKey, model, [
     { inline_data: { mime_type: blob.type || "audio/webm", data } },
     { text: promptText },
-  ], meeting);
+  ], kind);
 }
 
 // ---------- Prompts ----------
@@ -258,26 +276,43 @@ transcription_model: gemini-2.5-flash
 
 export function buildAuftragPrompt(meta) {
   const secs = Math.round(meta.durationSec);
-  return `Du bekommst eine kurze deutschsprachige Sprachaufnahme eines Klinikdirektors (Neurologie/Geriatrie). Er diktiert darin einen Arbeitsauftrag, den anschliessend ein KI-Assistent auf seinem Rechner bearbeitet — typischerweise waehrend der Visite gesprochen.
+  return `Du bekommst eine kurze deutschsprachige Sprachaufnahme eines Klinikdirektors (Neurologie/Geriatrie), meist waehrend der Visite gesprochen. Er diktiert einen Arbeitsauftrag, den anschliessend ein KI-Assistent auf seinem Rechner unbeaufsichtigt bearbeitet.
 
-Deine Aufgabe ist ausschliesslich, den Auftrag zu transkribieren und in eine bearbeitbare Form zu bringen.
+Du bist die Zwischenstufe. Deine Aufgabe hat zwei Teile:
+1. Das Diktat woertlich transkribieren.
+2. Daraus einen praezisen, selbsttragenden Arbeitsauftrag formulieren — einen, der ohne jede Rueckfrage bearbeitbar ist und ein brauchbares Ergebnis erzwingt.
 
-WICHTIG: Beantworte den Auftrag NICHT. Recherchiere nichts, schlussfolgere nichts, ergaenze kein Fachwissen. Du reichst den Auftrag nur weiter.
+WICHTIG: Beantworte den Auftrag NICHT. Recherchiere nichts, ergaenze kein Fachwissen, ziehe keine inhaltlichen Schluesse. Du formulierst den Auftrag, du erledigst ihn nicht.
 
 ${PROMPT_RULES}
-- Der Abschnitt "Auftrag" formuliert um, was verlangt wird — knapp, im Imperativ, ohne Fuellwoerter. Er darf verdichten und Selbstkorrekturen des Sprechers beruecksichtigen ("also nein, eigentlich meine ich..."), aber nichts hinzufuegen, was nicht gesagt wurde.
-- Wenn das Audio keinen erkennbaren Auftrag enthaelt: schreibe unter "Auftrag" exakt "Kein Auftrag erkennbar." und lasse das Transkript fuer sich sprechen.
+
+Regeln fuer den Abschnitt "Arbeitsauftrag":
+- Er ist selbsttragend. Der bearbeitende Assistent kennt weder dich noch die Situation auf Station; er hat nur diesen Text.
+- Ganze Saetze im Imperativ. Keine Fuellwoerter, keine Hoeflichkeitsformeln.
+- Selbstkorrekturen des Sprechers beruecksichtigen ("also nein, eigentlich meine ich...") — es gilt die letzte Fassung, nicht die erste.
+- Mache Implizites explizit: Was ist der Gegenstand, welche Frage genau ist zu beantworten, in welcher Form soll das Ergebnis vorliegen.
+- Verlange, wo es traegt, eine Empfehlung oder Einordnung statt einer blossen Aufzaehlung. Der Auftraggeber entscheidet, er sammelt nicht.
+
+DIE GRENZE — sie ist die wichtigste Regel dieses Prompts:
+Ergaenzen darfst du ausschliesslich die ARBEITSWEISE: Vorgehen, Quellenanspruch, Gliederung, Detailtiefe, Ergebnisform. Den GEGENSTAND nie.
+- Erlaubt: aus "Evidenz zu Botulinumtoxin bei Spastik" wird "...mit Angabe von Studiendesign und Evidenzlevel, Ergebnis als Vergleichstabelle".
+- Verboten: daraus "...einschliesslich Kostenaspekten und Versorgungsstrukturen" zu machen. Danach hat er nicht gefragt.
+Im Zweifel eng bleiben. Ein zu enger Auftrag liefert weniger; ein zu weiter liefert etwas, das nicht bestellt wurde.
+
+Wo das Diktat den Umfang offenlaesst, setze eine ausdrueckliche, benannte Annahme in den Arbeitsauftrag ("Annahme: gemeint ist der stationaere geriatrische Patient, nicht die Intensivsituation") statt die Luecke offenzulassen.
+
+Wenn das Audio keinen erkennbaren Auftrag enthaelt: schreibe unter "Arbeitsauftrag" exakt "Kein Auftrag erkennbar." und lasse das Transkript fuer sich sprechen.
+
+Bestimme die Auftragsart (Feld kind), im Zweifel "recherche". Sie steuert, worauf der Arbeitsauftrag zugeschnitten wird:
+- "recherche" — Literatur, Evidenzlage, Leitlinien, Ueberblick. Schaerfe die Fragestellung, benenne den Suchraum, verlange Quellen mit Jahr und Evidenzlevel sowie eine ausdrueckliche Aussage dort, wo die Evidenz duenn oder widerspruechlich ist.
+- "klinisch" — konkrete Fachfrage aus der Versorgung (Dosierung, Kontraindikation, Differentialdiagnose). Verlange eine kurze belegte Antwort und benenne den Patientenkontext, soweit gesagt. Kuerze ausdruecklich vorgeben.
+- "vault" — bezieht sich auf eigene Notizen, Protokolle, Projekte ("meine letzten Protokolle", "was hatten wir dazu festgehalten"). Benenne so genau wie moeglich, welches Material gemeint ist und welcher Zeitraum, und was daraus entstehen soll.
+- "dokument" — Brief, Bericht, Konzept, Praesentation. Benenne Textsorte, Adressat, Umfang und Tonfall, soweit aus dem Diktat ableitbar.
+
+Das Feld titel ist eine knappe Sachbezeichnung, hoechstens sechs Woerter, ohne Artikel am Anfang. Daraus wird ein Dateiname gebildet.
 
 Metadaten:
 ${buildMetaBlock(meta)}
-
-Bestimme die Auftragsart (Feld kind) nach diesen Regeln, im Zweifel "recherche":
-- "recherche" — Literatur, Evidenzlage, Leitlinien, Marktueberblick, alles was Suche im Netz braucht
-- "klinisch" — konkrete Fachfrage aus der Versorgung, die eine kurze belegte Antwort verlangt (Dosierung, Kontraindikation, Differentialdiagnose)
-- "vault" — bezieht sich auf eigene Notizen, Protokolle, Projekte oder frueheres Material ("meine letzten Protokolle", "was hatten wir dazu festgehalten")
-- "dokument" — ein Brief, Bericht, Konzept oder eine Praesentation soll entworfen werden
-
-Das Feld titel ist eine knappe Sachbezeichnung, hoechstens sechs Woerter, ohne Artikel am Anfang. Daraus wird ein Dateiname gebildet.
 
 Gib exakt folgendes Markdown zurueck, nichts davor, nichts danach:
 
@@ -293,8 +328,11 @@ status: offen
 
 # Auftrag: <derselbe Titel>
 
-## Auftrag
-<Was zu tun ist, knapp und im Imperativ, streng aus dem Gesagten.>
+## Arbeitsauftrag
+<Der selbsttragende, optimierte Auftrag nach obigen Regeln.>
+
+## Erwartetes Ergebnis
+<Form, Umfang und Detailtiefe in ein bis drei Zeilen. Woran erkennt man, dass der Auftrag erfuellt ist?>
 
 ## Kontext
 <Anlass, Hintergrund, Randbedingungen — nur soweit gesagt. Sonst exakt: "Keiner genannt.">

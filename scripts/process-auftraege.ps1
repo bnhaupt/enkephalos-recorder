@@ -40,6 +40,10 @@ $RemoteRoot     = "gdrive:Enkephalos-Auftraege"
 $VaultInbox     = "$env:USERPROFILE\OneDrive\Enkephalos\inbox"
 $OneDriveInbox  = "$env:USERPROFILE\OneDrive\00_INBOX"
 $VaultRoot      = "$env:USERPROFILE\OneDrive\Enkephalos"
+# Eigenes Leitlinien-Archiv: erspart bei Leitlinienfragen den Umweg ueber
+# die Websuche und liefert die Fassung, die hier tatsaechlich gilt.
+# Lesend — Schreibwerkzeuge sind in diesen Profilen abgeschaltet.
+$LeitlinienArchiv = "$env:USERPROFILE\OneDrive\03_RESOURCES\Leitlinien-Archiv"
 $WorkRoot       = "$env:LOCALAPPDATA\voice-pipeline\auftraege"
 $LogFile        = "$env:USERPROFILE\OneDrive\05_DEV\voice-pipeline\logs\auftraege.log"
 $AnweisungFile  = Join-Path $PSScriptRoot "auftrag-anweisung.md"
@@ -232,31 +236,46 @@ try {
         $kind = "recherche"
         if ($auftragText -match '(?m)^kind:\s*([a-z]+)\s*$') { $kind = $matches[1] }
 
+        # Jedes Profil listet ausdruecklich auf, was erlaubt ist. Sich auf
+        # `--permission-mode acceptEdits` allein zu verlassen, waere ein
+        # Fehler: der Modus genehmigt nur Datei-Aenderungen automatisch,
+        # WebSearch und WebFetch verlangen weiterhin eine Freigabe -- und im
+        # unbeaufsichtigten Lauf kann die niemand erteilen. Ohne den
+        # Allowlist-Eintrag antwortet der Lauf stillschweigend offline.
+        $leseWerkzeuge = @("Read", "Glob", "Grep", "WebSearch", "WebFetch", "Skill", "TodoWrite")
+        $schreibVerbot = @("Write", "Edit", "NotebookEdit", "Bash")
+
         $claudeArgs = @("-p", "--permission-mode")
         switch ($kind) {
             "dokument" {
                 # Eigener Sandkasten: Schreiben und Python nur im Arbeits-
                 # verzeichnis, kein Zugriff auf Vault oder OneDrive.
-                $claudeArgs += @(
-                    "acceptEdits",
-                    "--allowedTools", "Read", "Glob", "Grep", "WebSearch", "WebFetch",
-                    "Write", "Edit", "Skill", "Bash(python:*)", "Bash(pip:*)"
-                )
+                $claudeArgs += @("acceptEdits", "--allowedTools")
+                $claudeArgs += $leseWerkzeuge
+                $claudeArgs += @("Write", "Edit", "Bash(python:*)", "Bash(pip:*)")
             }
             "vault" {
-                # Leserecht auf das Vault, aber keinerlei Schreibwerkzeug.
-                $claudeArgs += @(
-                    "acceptEdits",
-                    "--add-dir", $VaultRoot,
-                    "--disallowedTools", "Write", "Edit", "NotebookEdit", "Bash"
-                )
+                # Leserecht auf Vault und Leitlinien-Archiv, kein Schreibwerkzeug.
+                $claudeArgs += @("acceptEdits", "--add-dir", $VaultRoot)
+                if (Test-Path -LiteralPath $LeitlinienArchiv) {
+                    $claudeArgs += @("--add-dir", $LeitlinienArchiv)
+                }
+                $claudeArgs += @("--allowedTools")
+                $claudeArgs += $leseWerkzeuge
+                $claudeArgs += @("--disallowedTools")
+                $claudeArgs += $schreibVerbot
             }
             default {
-                # recherche, klinisch: nur lesen und recherchieren.
-                $claudeArgs += @(
-                    "acceptEdits",
-                    "--disallowedTools", "Write", "Edit", "NotebookEdit", "Bash"
-                )
+                # recherche, klinisch: recherchieren und das eigene
+                # Leitlinien-Archiv lesen, sonst nichts.
+                $claudeArgs += @("acceptEdits")
+                if (Test-Path -LiteralPath $LeitlinienArchiv) {
+                    $claudeArgs += @("--add-dir", $LeitlinienArchiv)
+                }
+                $claudeArgs += @("--allowedTools")
+                $claudeArgs += $leseWerkzeuge
+                $claudeArgs += @("--disallowedTools")
+                $claudeArgs += $schreibVerbot
             }
         }
 

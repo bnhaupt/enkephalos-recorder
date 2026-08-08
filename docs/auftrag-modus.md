@@ -33,10 +33,21 @@ Werkzeuge der unbeaufsichtigte Lauf bekommt.
 
 | kind | Wofuer | Werkzeuge |
 |---|---|---|
-| `recherche` | Evidenzlage, Leitlinien, Literatur | Websuche, kein Dateizugriff |
-| `klinisch` | Konkrete Fachfrage, kurze belegte Antwort | Websuche, kein Dateizugriff |
-| `vault` | Arbeit auf eigenen Notizen und Protokollen | **Leserecht** auf das Vault |
+| `recherche` | Evidenzlage, Leitlinien, Literatur | Websuche, Leitlinien-Archiv lesend |
+| `klinisch` | Konkrete Fachfrage, kurze belegte Antwort | Websuche, Leitlinien-Archiv lesend |
+| `vault` | Arbeit auf eigenen Notizen und Protokollen | zusaetzlich **Leserecht** auf das Vault |
 | `dokument` | Brief, Bericht, Praesentation entwerfen | Eigener Sandkasten, Python fuer .docx/.pptx |
+
+Alle Profile lesen zusaetzlich `OneDrive/03_RESOURCES/Leitlinien-Archiv/` —
+bei Leitlinienfragen zaehlt die Fassung, die hier tatsaechlich gilt.
+
+> **Fallstrick, der einmal zugeschlagen hat:** Jedes Profil muss seine
+> Werkzeuge ausdruecklich auflisten. `--permission-mode acceptEdits` genehmigt
+> nur Datei-Aenderungen automatisch; `WebSearch` und `WebFetch` verlangen
+> weiterhin eine Freigabe, die im unbeaufsichtigten Lauf niemand erteilen
+> kann. Ohne den Allowlist-Eintrag antwortet der Lauf **stillschweigend
+> offline** — und eine Antwort aus dem Modellgedaechtnis sieht genauso aus wie
+> eine recherchierte.
 
 ---
 

@@ -365,13 +365,13 @@ async function transcribeRecording(id) {
     let markdown;
     if (isShort && rec.audioBlob.size <= INLINE_MAX_BYTES) {
       // Kurze Aufnahmen inline: ein Request statt Upload + Poll + Delete.
-      markdown = await generateContentInline(apiKey, GEMINI_MODEL, rec.audioBlob, promptText, { meeting: false });
+      markdown = await generateContentInline(apiKey, GEMINI_MODEL, rec.audioBlob, promptText, { kind: rec.kind });
     } else {
       const displayName = `enkephalos-${rec.kind}-${rec.id}-${Date.now()}`;
       let file = await uploadAudio(apiKey, rec.audioBlob, displayName);
       fileName = file.name;
       file = await waitForFileActive(apiKey, file);
-      markdown = await generateContent(apiKey, GEMINI_MODEL, file, promptText, { meeting: rec.kind === "meeting" });
+      markdown = await generateContent(apiKey, GEMINI_MODEL, file, promptText, { kind: rec.kind });
     }
 
     const patch = {

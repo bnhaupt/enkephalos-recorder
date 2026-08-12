@@ -9,7 +9,7 @@ REM "in Arbeit", der erst beim naechsten Durchlauf wieder freigegeben wird.
 
 schtasks /Create ^
   /TN "Enkephalos Auftraege" ^
-  /TR "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"%~dp0process-auftraege.ps1\"" ^
+  /TR "wscript.exe //B \"%~dp0..\..\run-hidden.vbs\" \"%~dp0process-auftraege.ps1\"" ^
   /SC MINUTE ^
   /MO 5 ^
   /RL LIMITED ^

@@ -4,7 +4,7 @@ REM Laeuft alle 5 Minuten im Hintergrund als aktueller Benutzer.
 
 schtasks /Create ^
   /TN "Enkephalos Inbox Sync" ^
-  /TR "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"%~dp0sync-inbox.ps1\"" ^
+  /TR "wscript.exe //B \"%~dp0..\..\run-hidden.vbs\" \"%~dp0sync-inbox.ps1\"" ^
   /SC MINUTE ^
   /MO 5 ^
   /RL LIMITED ^

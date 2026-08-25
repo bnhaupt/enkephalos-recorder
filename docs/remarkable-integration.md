@@ -1,4 +1,4 @@
-# reMarkable-Integration — Stand 23.08.2026: Kanal gebaut und getestet, Go
+# reMarkable-Integration — Stand 25.08.2026: produktiv, laeuft automatisch alle 5 Min
 
 Ziel: Handschriftliche Notizen vom reMarkable in dieselbe Pipeline einspeisen
 wie die Sprachnotizen der Claudia-PWA. Eingangsmodalitaet ist PDF
@@ -31,6 +31,8 @@ Enkephalos-Handschrift/
     ├── abteilungsleiter/
     ├── oberaerzte-reha/
     ├── oberaerzte-akut/
+    ├── oberaerzte-gross/
+    ├── therapien/
     ├── klinikleitung-interdisziplinaer/
     ├── klinikleitung-aerzte/
     ├── personal/
@@ -44,8 +46,8 @@ Enkephalos-Handschrift/
     └── ...
 ```
 
-**Slug-Herkunft:** Die zehn JF-Ordnernamen sind bewusst identisch mit den
-Kategorien im Meeting-Modus der Claudia-PWA (`pwa/index.html:110-120`,
+**Slug-Herkunft:** Die zwoelf JF-Ordnernamen sind bewusst identisch mit den
+Kategorien im Meeting-Modus der Claudia-PWA (`pwa/index.html`,
 `meeting-category`-Dropdown), nur mechanisch in Kleinbuchstaben-Slugs
 uebersetzt (kein `jf `-Praefix, Leerzeichen -> Bindestrich, keine Umlaute).
 Eine Ausnahme wurde gekuerzt: PWA-Kategorie
@@ -54,6 +56,18 @@ Eine Ausnahme wurde gekuerzt: PWA-Kategorie
 waeren als Ordnername/Slug unhandlich gewesen). Die PWA-Kategorie
 "Sonstiges Meeting" ist kein JF und bekommt keinen Ordner — bleibt in der
 Wurzel.
+
+**Die Liste driftet, wenn nur eine Seite gepflegt wird.** Am 25.08.2026 fiel
+auf, dass `oberaerzte-gross` im Drive schon benutzt wurde (eine verarbeitete
+Notiz), im PWA-Dropdown aber fehlte; umgekehrt fuehrte die Doku `therapien`
+nicht, obwohl PWA und Drive es beide hatten. Beides nachgezogen. **Beim
+Anlegen einer neuen JF-Reihe daher immer alle drei Orte fassen:** Drive-Ordner
+`JF/<slug>/`, PWA-Option `jf <Label>` in `pwa/index.html` (plus
+`CACHE_NAME`-Bump in `pwa/sw.js`, sonst zieht der Service Worker die alte
+Fassung), und diese Liste hier. Zur Kontrolle:
+```powershell
+rclone lsf "gdrive:Enkephalos-Handschrift/JF" --dirs-only
+```
 
 **Ziel dieser Namensgleichheit:** Eine Sitzung derselben JF-Reihe soll beim
 spaeteren Vault-Ingest kanalunabhaengig am selben Ort landen — egal ob sie
@@ -84,6 +98,7 @@ Drive-Aenderungszeitstempel der Datei.
 | `scripts/process-handschrift.ps1` | Holt neue PDFs per rclone, startet Claude Code headless, legt Ergebnis in `Enkephalos/inbox/`, verschiebt Quelle nach `verarbeitet/` bzw. `fehler/` |
 | `scripts/handschrift-anweisung.md` | Betriebsanweisung fuer den headless-Lauf: Ausgabeformat, Anti-Halluzinations-Regeln, `kind: handwriting` vs. `kind: jf` |
 | `scripts/handschrift-abkuerzungen.md` | Editierbare Abkuerzungslegende, wird in den Prompt eingebettet. Vom Nutzer frei erweiterbar, ohne Skript-Aenderung. |
+| `scripts/install-handschrift-task.cmd` | Registriert den Scheduled Task `Enkephalos Handschrift` (alle 5 Min). Einmalig ausfuehren, siehe unten. |
 
 **Frontmatter-Konvention der Ergebnisdatei:**
 ```yaml
@@ -101,6 +116,57 @@ Eingangszone vor; die Einsortierung in einen konkreten `areas/`-Ordner
 passiert ueber den bestehenden Ingest-Dialog, nicht automatisiert durch das
 Skript. Der Bereich `areas/jour-fixes/<reihe>/` existiert noch nicht und
 entsteht erst beim ersten tatsaechlichen Ingest einer JF-Notiz.
+
+## Automatischer Lauf (Scheduled Task, eingerichtet 25.08.2026)
+
+Registriert per `scripts\install-handschrift-task.cmd` (einmalig, als der
+Benutzer, dem der rclone-Token gehoert):
+
+| Einstellung | Wert |
+|---|---|
+| Taskname | `Enkephalos Handschrift` |
+| Rhythmus | alle 5 Minuten, Startminute `:00` |
+| Aufruf | `wscript.exe //B ..\..\run-hidden.vbs scripts\process-handschrift.ps1` (fensterlos, wartet auf Prozessende) |
+| `ExecutionTimeLimit` | `PT1H` |
+| `DisallowStartIfOnBatteries` | `False` |
+| `StopIfGoingOnBatteries` | `False` |
+
+**Phasenlage im Fuenf-Minuten-Raster — nicht beliebig waehlbar.** Alle drei
+Tasks sprechen dasselbe Drive-Konto ueber denselben rclone-OAuth-Token an.
+Laufen zwei rclone-Prozesse gleichzeitig, verliert zuverlaessig der
+aufwendigere (Vorfall 2026-08-10 bis 2026-08-24, siehe
+`scripts/install-auftrag-task.cmd`). Die Startminuten sind deshalb so
+gestaffelt, dass der rclone-Anteil jedes Tasks in die Claude- bzw. Ruhephase
+der anderen faellt:
+
+| Minute | Task | rclone-Anteil |
+|---|---|---|
+| `:00` | Enkephalos Handschrift | ein `lsjson`, danach Claude (Minuten) |
+| `:02` | Enkephalos Inbox Sync | ein `move`, Sekunden |
+| `:04` | Enkephalos Auftraege | `mkdir` + zwei `lsf`, danach Claude (Minuten) |
+
+**Wird ein vierter Task auf dieses Raster gelegt, ist die Tabelle oben
+zuerst zu pruefen** — freie Minuten sind nur noch `:01` und `:03`, und beide
+liegen eine Minute neben einem bestehenden Start.
+
+**Akku bewusst nicht gegated** — anders als beim Inbox Sync, gleiche
+Begruendung wie beim Auftraege-Task: ein Lauf, der mitten in der
+Transkription abgeschossen wird, verbrennt Claude-Laufzeit und hinterlaesst
+eine Sperrdatei (`%LOCALAPPDATA%\voice-pipeline\handschrift\.lock`), die
+erst nach 30 Minuten als verwaist gilt und uebernommen wird.
+
+**Ueberlappungsschutz** doppelt: der Scheduler startet keine zweite Instanz,
+solange die alte laeuft (`run-hidden.vbs` wartet auf das Prozessende), und
+das Skript selbst haelt die genannte Sperrdatei.
+
+**Log:** `logs/handschrift.log`. Ein Lauf ohne neue PDFs schreibt bewusst
+nichts — Stille im Log heisst "nichts zu tun", nicht "Task laeuft nicht".
+Zur Kontrolle stattdessen:
+```powershell
+Get-ScheduledTaskInfo -TaskName 'Enkephalos Handschrift' |
+  Select-Object LastRunTime, LastTaskResult, NextRunTime
+```
+`LastTaskResult` `0` = ok, `267009` = laeuft gerade.
 
 ## Kalender — bewusst kein Pipeline-Feature
 
@@ -134,16 +200,20 @@ Schreibsorgfalt schwankt, nicht mit fachlicher Komplexitaet.
   dass auch mit Anti-Halluzinations-Prompt ein Restrisiko bei unordentlicher
   Schrift bleibt.
 
-## TODO (Stand 23.08.2026, nichts davon blockiert den produktiven Einsatz)
+## TODO (Stand 25.08.2026, nichts davon blockiert den produktiven Einsatz)
 
-- [ ] `kind: jf`-Pfad end-to-end testen (bisher nur `kind: handwriting`
-      getestet, da beide Testdateien in der Wurzel lagen) — Testnotiz in
-      einen `JF/<reihe>/`-Ordner legen und Lauf wiederholen.
+- [x] `kind: jf`-Pfad end-to-end getestet (25.08.2026): zwei Notizen aus
+      `JF/oberaerzte-gross/` und `JF/personal/` sauber verarbeitet, Ergebnis
+      als `...-jf-<reihe>.md` in der Inbox, Quellen in `verarbeitet/`
+      (`logs/handschrift.log`, 17:30-17:32).
 - [ ] Marker-Sprache im Prompt schaerfen, damit `[Name unklar: ...]`
       durchgaengig deutsch herauskommt.
-- [ ] Scheduled Task einrichten (5-Minuten-Rhythmus, analog "Enkephalos
-      Inbox Sync"), inkl. Akku-Gating (`DisallowStartIfOnBatteries`) wie bei
-      den bestehenden Tasks.
+- [x] Scheduled Task `Enkephalos Handschrift` eingerichtet (25.08.2026,
+      5-Minuten-Rhythmus auf Minute `:00`) — siehe Abschnitt "Automatischer
+      Lauf". Abweichend von der urspruenglichen Notiz **ohne** Akku-Gating:
+      die Begruendung des Auftraege-Tasks (abgeschossene Claude-Laufzeit,
+      verwaiste Sperrdatei) gilt hier gleichermassen, das Akku-Gating des
+      Inbox-Sync passt nur zu dessen sekundenkurzem Lauf.
 - [ ] Offene Abkuerzungen aus dem ersten Praxistest ggf. aufloesen
       (`KTL-BS`, `KCSR`, `ETH4`, "Doejter Schule") — aktuell in
       `handschrift-abkuerzungen.md` bewusst offen gelassen.

@@ -1,4 +1,4 @@
-# reMarkable-Integration — Stand 25.08.2026: produktiv, JF-Kanal beidseitig
+# reMarkable-Integration — Stand 25.08.2026: produktiv, JF-Kanal abgeschlossen
 
 Ziel: Handschriftliche Notizen vom reMarkable in dieselbe Pipeline einspeisen
 wie die Sprachnotizen der Claudia-PWA. Eingangsmodalitaet ist PDF
@@ -168,6 +168,39 @@ ablesbar.
 Stopp, und eine Kategorieabfrage wuerde den Ein-Tap-Charakter aufgeben.
 Siehe TODO.
 
+## Warum der Kurznotiz-Modus keine JF-Zuordnung bekommt
+
+Entscheidung des Nutzers vom 25.08.2026, nach Abwaegung. Der dritte Kanal
+bleibt damit dauerhaft ohne `jf_reihe` — das ist gewollt, kein Rueckstand.
+
+**Die Trennlinie zwischen den Modi ist nicht kurz gegen lang, sondern "hat
+schon eine Heimat" gegen "hat noch keine".** Ein JF-Gedaechtnisprotokoll
+gehoert in den Meeting-Modus, auch wenn es nur 40 Sekunden dauert; dort
+steht das Kategorie-Dropdown. Der Kurznotiz-Modus deckt den fluechtigen
+Gedanken ohne Zuordnung ab — den Normalfall, der reibungsfrei bleiben muss.
+
+**Gegen ein Modal im Kurznotiz-Modus spricht die Mechanik:** der Modus
+verlangt heute keine zweite Interaktion. Ein Tap, sprechen, Auto-Stopp nach
+3 s Stille; Transkription und Upload laufen, ohne dass das Geraet noch
+einmal angesehen wird. Ein Modal wartet genau dort — und der Auto-Stopp
+greift oft erst, wenn das Handy schon in der Tasche ist.
+
+**Gegen eine nachtraegliche Zuordnung in der History spricht das
+Zeitfenster:** die Drive-Datei-ID steht zwar auf dem Datensatz
+(`driveFileId`), aber der Sync-Task verschiebt die Datei binnen maximal
+5 Minuten aus Drive ins Vault. Danach kommt die PWA nicht mehr an sie
+heran. Wer die Notiz einspricht und einsteckt, verpasst das Fenster — der
+Aufwand kaufte also nur den Fall, in dem ohnehin noch das Handy in der Hand
+liegt.
+
+**Frei tippbare Kategorien wurden ebenfalls verworfen.** Der Wert von
+`jf_reihe` liegt im geschlossenen Vokabular beider Kanaele. Sobald die
+Reihe tippbar ist, genuegt eine Variante ("oberaerzte gross" statt
+`oberaerzte-gross`), und die Sitzung landet stumm neben statt in ihrer
+Reihe. Freitext im Feld "Zusatz (optional)" ist unkritisch und bleibt: er
+haengt sich als `<Kategorie> - <Zusatz>` an Titel und Dateinamen, ohne
+`jf_reihe` zu beruehren.
+
 ## Automatischer Lauf (Scheduled Task, eingerichtet 25.08.2026)
 
 Registriert per `scripts\install-handschrift-task.cmd` (einmalig, als der
@@ -271,12 +304,9 @@ Schreibsorgfalt schwankt, nicht mit fachlicher Komplexitaet.
 - [x] Claudia-PWA um JF-Zuordnung im **Meeting-Modus** erweitert
       (25.08.2026, siehe Abschnitt "JF-Zuordnung in der PWA"). Damit stehen
       zwei der drei Kanaele.
-- [ ] **Kurznotiz-Modus bleibt ohne JF-Zuordnung.** Der Modus hat bewusst
-      keine Abfrage nach dem Stopp (ein Tap, Auto-Stopp, kein Modal) — eine
-      Kategorieauswahl wuerde genau das aufgeben. Solange offen, laufen
-      Kurznotizen zu einer JF-Reihe weiter generisch in die Inbox.
-      Entscheidung des Nutzers noetig, welcher Weg (nachtraegliche Zuordnung
-      in der History? Reihe ansagen und aus dem Transkript ableiten?).
+- [x] **Kurznotiz-Modus bleibt bewusst ohne JF-Zuordnung** (Entscheidung
+      des Nutzers, 25.08.2026) — siehe Abschnitt "Warum der Kurznotiz-Modus
+      keine JF-Zuordnung bekommt". Kein weiterer Handlungsbedarf.
 - [ ] `areas/jour-fixes/<reihe>/` entsteht bewusst erst beim ersten
       tatsaechlichen Ingest — keine Vorab-Anlage durch die Pipeline.
 

@@ -1,6 +1,14 @@
-# Voice Pipeline — Stand 2026-07-17 (produktiv, Phase 5 bewusst zurueckgestellt)
+# Voice Pipeline — Stand 2026-07-20 (produktiv, Phase 5 bewusst zurueckgestellt)
 
 Kurzer Einstieg, um nach Pause weiterzumachen.
+
+> **Achtung, Luecke:** Dieses Dokument ist ab 2026-07-20 nicht weitergefuehrt
+> worden. Alles danach steht **nicht** hier drin, sondern nur in `git log`
+> und in `docs/`: Auftrags-Modus (August), Startbildschirm Richtung B,
+> reMarkable-Handschrift-Pipeline samt Scheduled Task, `jf_reihe` im
+> Meeting-Modus. Fuer den aktuellen Stand dieser Themen ist
+> `docs/remarkable-integration.md` bzw. `docs/auftrag-modus.md` die
+> fuehrende Quelle, nicht dieses Dokument.
 
 ## Was laeuft
 
@@ -41,7 +49,7 @@ Kurzer Einstieg, um nach Pause weiterzumachen.
 
 ### Nachtraege seit 2026-04-18
 
-- **2026-05-22:** Auto-Split fuer Meetings >30 Min umgesetzt (Teil-Scope aus Phase-5-Punkt 1): Audio-Blob wird halbiert, zwei Gemini-Calls (`buildMeetingPromptPart1/2`), Ergebnis konkateniert. `maxOutputTokens` fuer Meetings auf 32768. Chunk-Recovery (der andere Teil-Scope) weiterhin offen.
+- **2026-05-22:** Auto-Split fuer Meetings >30 Min umgesetzt (Teil-Scope aus Phase-5-Punkt 1): Audio-Blob wird halbiert, zwei Gemini-Calls (`buildMeetingPromptPart1/2`), Ergebnis konkateniert. `maxOutputTokens` fuer Meetings auf 32768. Chunk-Recovery (der andere Teil-Scope) weiterhin offen. **Ueberholt — am 2026-07-20 wieder entfernt, siehe unten.**
 - **2026-05-22:** `?reset-drive`-URL-Parameter loescht Drive-Config aus IndexedDB (seit 2026-07-17 mit `confirm()`-Rueckfrage).
 - **2026-07-17:** Storage-Eviction-Fix nach zweimaligem Key-Verlust: `navigator.storage.persist()` beim Init (`requestPersistentStorage()` in `app.js`). Ursache war Chrome-Origin-Eviction — IndexedDB galt ohne persist() als „best effort".
 - **2026-07-17:** Drive-Client-ID hardcoded (siehe Phase 4).
@@ -49,11 +57,13 @@ Kurzer Einstieg, um nach Pause weiterzumachen.
 - **2026-07-17 (Paket A — Qualitaet/Speed):**
   - Prompts gehaertet: verbindlicher Anti-Halluzinations-Regelblock (`PROMPT_RULES`/`MEETING_RULES` in `gemini.js`) — nichts erfinden, [unverstaendlich]-Marker, "Keine." statt Ausfuellzwang bei Entscheidungen/Todos, Sprecherlabels nur bei klarer Trennung, nuechterner Telegrammstil. `temperature` 0, `thinkingBudget` 0 (Flash denkt sonst per Default vor — Latenz ohne Nutzen).
   - Ideen laufen inline (`generateContentInline`, Base64 im generateContent-Call) statt ueber Files API — 1 Request statt 3 + Polling.
-  - Auto-Split-Teile laufen parallel (Promise.all) statt sequenziell.
+  - Auto-Split-Teile laufen parallel (Promise.all) statt sequenziell. (Ueberholt — Split am 2026-07-20 entfernt.)
   - Aufnahme: 32 kbps Opus mono (`audioBitsPerSecond` in `recorder.js`) — Uploads ~4x kleiner.
   - Audio-Blobs werden nach erfolgreichem Drive-Upload aus IndexedDB entfernt (plus Startup-Cleanup fuer Altbestand) — vorher wuchs die DB unbegrenzt und erhoehte den Eviction-Druck.
   - SW-Cache v13.
-  - Bekannte Restpunkte (Paket B, bei Bedarf): sauberer 30-Min-Split per Recorder-Neustart statt Blob-slice (zweite Haelfte hat keinen WebM-Header — funktioniert, ist aber fragil), Chunk-Recovery, Silent-Token-Refresh, OAuth-Consent auf Production.
+  - Bekannte Restpunkte (Paket B, bei Bedarf): Chunk-Recovery, Silent-Token-Refresh, OAuth-Consent auf Production. (Der hier urspruenglich genannte 30-Min-Split ist am 2026-07-20 ersatzlos entfallen, siehe naechster Eintrag.)
+
+- **2026-07-20 — Auto-Split wieder entfernt (Commit `a21f20a`).** Der Byte-Split aus dem 22.05.-Eintrag oben schnitt den WebM-Container per Offset; die zweite Haelfte hatte keinen EBML-Header und war nicht dekodierbar — **Datenverlust bei Meetings >30 Min**. Flash fasst rund eine Stunde in einem Request, der Split war ueberfluessig geworden. Seitdem laeuft jedes Meeting ueber genau einen Gemini-Call, unabhaengig von der Laenge. Gleicher Commit: Audio 32 -> 96 kbps und NS/AGC/EchoCancel aus (erhaelt Sprecher-Cues), `thinkingBudget` dynamisch, `maxOutputTokens` 65536, Teilnehmer-Feld im Titel-Modal. **Nicht wieder einbauen** — wenn ueberhaupt, dann als sauberer Recorder-Neustart bei 30 Min (Phase-5-Punkt 1), nie wieder als Blob-slice.
 
 ### Phase 5 — Polish [bewusst zurueckgestellt am 2026-04-18]
 

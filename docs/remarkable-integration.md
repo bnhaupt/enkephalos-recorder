@@ -1,4 +1,4 @@
-# reMarkable-Integration — Stand 25.08.2026: produktiv, laeuft automatisch alle 5 Min
+# reMarkable-Integration — Stand 25.08.2026: produktiv, JF-Kanal beidseitig
 
 Ziel: Handschriftliche Notizen vom reMarkable in dieselbe Pipeline einspeisen
 wie die Sprachnotizen der Claudia-PWA. Eingangsmodalitaet ist PDF
@@ -73,8 +73,8 @@ rclone lsf "gdrive:Enkephalos-Handschrift/JF" --dirs-only
 spaeteren Vault-Ingest kanalunabhaengig am selben Ort landen — egal ob sie
 als reMarkable-Handschrift, kurze PWA-Sprachnotiz oder komplette
 PWA-Meetingaufzeichnung erfasst wurde. Der Slug ist der gemeinsame Schluessel
-(`jf_reihe:` im Frontmatter). **Die PWA selbst vergibt dieses Feld noch
-nicht** — das ist offene Arbeit, siehe TODO unten.
+(`jf_reihe:` im Frontmatter). **Seit 25.08.2026 vergibt auch die PWA dieses
+Feld** im Meeting-Modus — siehe Abschnitt "JF-Zuordnung in der PWA".
 
 ## Bedienung am Geraet
 
@@ -116,6 +116,57 @@ Eingangszone vor; die Einsortierung in einen konkreten `areas/`-Ordner
 passiert ueber den bestehenden Ingest-Dialog, nicht automatisiert durch das
 Skript. Der Bereich `areas/jour-fixes/<reihe>/` existiert noch nicht und
 entsteht erst beim ersten tatsaechlichen Ingest einer JF-Notiz.
+
+## JF-Zuordnung in der PWA (Meeting-Modus, seit 25.08.2026)
+
+Der Meeting-Modus der Claudia-PWA schreibt jetzt dieselbe Frontmatter wie
+die Handschrift-Pipeline. Eine Aufnahme der Kategorie `jf Personal` ergibt:
+
+```yaml
+type: voice-capture
+kind: jf
+jf_reihe: personal
+captured: <ISO>
+duration_sec: <n>
+title: jf Personal
+quelle: claudia
+transcription_model: gemini-2.5-flash
+```
+
+Gegenstueck zur Handschrift, die `quelle: remarkable` und
+`transcription_model: claude` traegt. `kind: meeting` gibt es weiterhin,
+aber nur noch fuer die Kategorie "Sonstiges Meeting" — alles mit `jf `-
+Praefix wird zu `kind: jf`.
+
+**Woher der Slug kommt:** aus dem Attribut `data-jf-reihe` an der jeweiligen
+`<option>` in `pwa/index.html`. Das Dropdown ist damit die einzige Quelle
+der Wahrheit; eine neue JF-Reihe braucht keine Code-Aenderung, nur die eine
+Option-Zeile. Der Umweg ueber ein generisches Slugify waere hier falsch:
+"jf Therapien, Therapieplanung und Controlling" muss auf
+`therapieplanung-controlling` abgebildet werden, nicht auf
+`therapien-therapieplanung-und-controlling`.
+
+**Zweifach abgesichert.** Der Prompt fordert die JF-Frontmatter bereits an,
+und `applyJfFrontmatter()` in `pwa/gemini.js` setzt sie nach der
+Transkription noch einmal deterministisch. Grund: `jf_reihe` ist der
+Schluessel, ueber den beide Kanaele im Vault zusammenfinden — ein stiller
+Modellfehler an dieser Stelle waere im fertigen Text nicht zu sehen und
+wuerde die Zuordnung lautlos zerreissen. Ein vom Modell selbst erfundenes
+`jf_reihe` wird verworfen. Fehlt die Frontmatter ganz, bleibt das Markdown
+unangetastet — dann ist ohnehin Sichtpruefung faellig.
+
+**Bestandsaufnahmen und Wiederholversuche** funktionieren ebenfalls: liegt
+auf dem Datensatz kein `jfReihe` (Aufnahme aelter als diese Aenderung), wird
+die Reihe aus dem Titel zurueckgewonnen, der mit der Kategorie beginnt.
+
+**Der Dateiname bleibt unveraendert** (`<ts>-meeting-<slug>.md`), waehrend
+die Handschrift `<ts>-jf-<reihe>.md` erzeugt. Bewusst so gelassen: die
+Zuordnung haengt an der Frontmatter, und am Dateinamen bleibt der Kanal
+ablesbar.
+
+**Kurznotiz-Modus ist bewusst aussen vor** — er hat kein Modal nach dem
+Stopp, und eine Kategorieabfrage wuerde den Ein-Tap-Charakter aufgeben.
+Siehe TODO.
 
 ## Automatischer Lauf (Scheduled Task, eingerichtet 25.08.2026)
 
@@ -217,11 +268,15 @@ Schreibsorgfalt schwankt, nicht mit fachlicher Komplexitaet.
 - [ ] Offene Abkuerzungen aus dem ersten Praxistest ggf. aufloesen
       (`KTL-BS`, `KCSR`, `ETH4`, "Doejter Schule") — aktuell in
       `handschrift-abkuerzungen.md` bewusst offen gelassen.
-- [ ] Claudia-PWA um JF-Zuordnung im Meeting-Modus erweitern (`kind: jf` /
-      `jf_reihe:` analog zur Handschrift-Pipeline), damit alle drei Kanaele
-      (reMarkable, Kurznotiz, PWA-Meetingaufzeichnung) derselben JF-Reihe
-      beim Ingest am selben Ort landen. Bisher nur die Handschrift-Seite
-      steht; die PWA-Seite ist unveraendert.
+- [x] Claudia-PWA um JF-Zuordnung im **Meeting-Modus** erweitert
+      (25.08.2026, siehe Abschnitt "JF-Zuordnung in der PWA"). Damit stehen
+      zwei der drei Kanaele.
+- [ ] **Kurznotiz-Modus bleibt ohne JF-Zuordnung.** Der Modus hat bewusst
+      keine Abfrage nach dem Stopp (ein Tap, Auto-Stopp, kein Modal) — eine
+      Kategorieauswahl wuerde genau das aufgeben. Solange offen, laufen
+      Kurznotizen zu einer JF-Reihe weiter generisch in die Inbox.
+      Entscheidung des Nutzers noetig, welcher Weg (nachtraegliche Zuordnung
+      in der History? Reihe ansagen und aus dem Transkript ableiten?).
 - [ ] `areas/jour-fixes/<reihe>/` entsteht bewusst erst beim ersten
       tatsaechlichen Ingest — keine Vorab-Anlage durch die Pipeline.
 

@@ -17,6 +17,7 @@ import {
   buildIdeaPrompt,
   buildMeetingPrompt,
   buildAuftragPrompt,
+  applyJfFrontmatter,
 } from "./gemini.js";
 import {
   hasGis,
@@ -398,11 +399,16 @@ async function transcribeRecording(id) {
       return;
     }
 
+    const jfReihe = rec.kind === "meeting"
+      ? (rec.jfReihe || jfReiheFromTitle(rec.title))
+      : null;
+
     const meta = {
       isoTimestamp: rec.createdAt,
       durationSec: rec.durationSec,
       title: rec.title,
       participants: rec.participants,
+      jfReihe,
     };
 
     const promptText = rec.kind === "auftrag"
@@ -426,7 +432,7 @@ async function transcribeRecording(id) {
 
     const patch = {
       status: "uploading",
-      markdown,
+      markdown: applyJfFrontmatter(markdown, jfReihe),
       transcriptionModel: GEMINI_MODEL,
       transcribedAt: new Date().toISOString(),
       errorMessage: null,
@@ -887,7 +893,7 @@ async function startRecScreen(kind) {
   }
 }
 
-async function finalizeAndSave(titleFromUser = null, participantsFromUser = null) {
+async function finalizeAndSave(titleFromUser = null, participantsFromUser = null, jfReiheFromUser = null) {
   // Guard gegen Doppel-Finalisierung (manueller Stopp + Silence-Auto-Stop
   // koennen sich zeitlich ueberlappen).
   if (!currentRec || currentRec.finalizing) return;
@@ -920,6 +926,7 @@ async function finalizeAndSave(titleFromUser = null, participantsFromUser = null
   if (participantsFromUser && participantsFromUser.trim()) {
     entry.participants = participantsFromUser.trim();
   }
+  if (jfReiheFromUser) entry.jfReihe = jfReiheFromUser;
 
   const newId = await dbAdd(STORE_RECORDINGS, entry);
   toast(
@@ -949,8 +956,8 @@ async function finalizeMeetingFlow() {
   clearRecTimer();
   const stopBtn = document.getElementById("meeting-stop");
   if (stopBtn) stopBtn.disabled = true;
-  const { title, participants } = await askForTitle();
-  await finalizeAndSave(title, participants);
+  const { title, participants, jfReihe } = await askForTitle();
+  await finalizeAndSave(title, participants, jfReihe);
 }
 
 function discardAndGoHome() {
@@ -1014,6 +1021,36 @@ async function loadParticipantsFor(category) {
   }
 }
 
+// Slug der JF-Reihe zu einer Kategorie des Meeting-Dropdowns.
+//
+// Die Zuordnung steht als `data-jf-reihe` an der jeweiligen <option> in
+// index.html -- damit ist das Dropdown die einzige Quelle der Wahrheit und
+// eine neue Reihe braucht hier keine Code-Aenderung. "Sonstiges Meeting"
+// hat bewusst kein Attribut und liefert null.
+function jfReiheForCategory(category) {
+  if (!category) return null;
+  const sel = document.getElementById("meeting-category");
+  if (!sel) return null;
+  const opt = Array.from(sel.options).find((o) => o.value === category);
+  return (opt && opt.dataset.jfReihe) || null;
+}
+
+// Fallback fuer Aufnahmen, die vor der Einfuehrung von `jfReihe` entstanden
+// sind oder erneut transkribiert werden: der Titel beginnt mit der
+// Kategorie, ein optionaler Zusatz haengt als " - <Zusatz>" hinten dran.
+function jfReiheFromTitle(title) {
+  if (!title) return null;
+  const sel = document.getElementById("meeting-category");
+  if (!sel) return null;
+  const opt = Array.from(sel.options)
+    .filter((o) => o.dataset.jfReihe)
+    // Laengste Uebereinstimmung zuerst, sonst gewinnt "jf Therapien" gegen
+    // "jf Therapien, Therapieplanung und Controlling".
+    .sort((a, b) => b.value.length - a.value.length)
+    .find((o) => title === o.value || title.startsWith(o.value + " - "));
+  return (opt && opt.dataset.jfReihe) || null;
+}
+
 async function askForTitle() {
   const modal = document.getElementById("title-modal");
   const categorySel = document.getElementById("meeting-category");
@@ -1021,7 +1058,7 @@ async function askForTitle() {
   const participantsEl = document.getElementById("participants-input");
   const ok = document.getElementById("title-ok");
   if (!modal || !categorySel || !input || !participantsEl || !ok) {
-    return { title: null, participants: "" };
+    return { title: null, participants: "", jfReihe: null };
   }
 
   // Letzte Auswahl vorbelegen.
@@ -1080,7 +1117,7 @@ async function askForTitle() {
         }
       } catch {}
 
-      resolve({ title, participants });
+      resolve({ title, participants, jfReihe: jfReiheForCategory(category) });
     };
     const onOk = () => finish();
     const onKey = (ev) => {

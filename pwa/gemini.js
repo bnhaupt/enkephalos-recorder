@@ -352,6 +352,86 @@ function buildParticipantsBlock(participants) {
 Nutze diese Angabe als Anker fuer die Sprechertrennung: als Schaetzung der Sprecherzahl und, wo eine Stimme klar einem genannten Namen zuzuordnen ist, zur Benennung. Erfinde daraus keine Aussagen; wer nicht hoerbar ist, wird nicht ins Transkript aufgenommen.\n`;
 }
 
+// Frontmatter-Kopf einer Meeting-Aufzeichnung.
+//
+// Gehoert die Aufnahme zu einer Jour-Fixe-Reihe, wird exakt die Konvention
+// der Handschrift-Pipeline uebernommen (`kind: jf` + `jf_reihe:` + `quelle:`,
+// siehe docs/remarkable-integration.md). Nur so laufen reMarkable-Notiz und
+// PWA-Aufzeichnung derselben Sitzung beim Vault-Ingest am selben Ort
+// zusammen -- `jf_reihe` ist der gemeinsame Schluessel beider Kanaele.
+function buildMeetingFrontmatter(meta, secs, title) {
+  const kindLines = meta.jfReihe
+    ? `kind: jf
+jf_reihe: ${meta.jfReihe}`
+    : "kind: meeting";
+  const quelleLine = meta.jfReihe ? `
+quelle: claudia` : "";
+  return `---
+type: voice-capture
+${kindLines}
+captured: ${meta.isoTimestamp}
+duration_sec: ${secs}
+title: ${title}${quelleLine}
+transcription_model: gemini-2.5-flash
+---`;
+}
+
+// Erzwingt die JF-Frontmatter deterministisch auf dem Modellergebnis.
+//
+// Der Prompt fordert `kind: jf` / `jf_reihe:` zwar bereits an, aber
+// `jf_reihe` ist der Schluessel, ueber den Handschrift- und Sprachkanal
+// derselben Sitzung im Vault zusammenfinden. Ein stiller Modellfehler an
+// dieser Stelle waere im Ergebnis nicht sichtbar und wuerde die Zuordnung
+// lautlos zerreissen -- deshalb wird der Kopf nach der Transkription noch
+// einmal hart gesetzt statt dem Modell geglaubt.
+//
+// Angefasst wird ausschliesslich der fuehrende Frontmatter-Block. Fehlt er
+// (Modell hat das Format verfehlt), bleibt das Markdown unveraendert: dann
+// ist ohnehin eine Sichtpruefung faellig, und stilles Zurechtbiegen wuerde
+// den Fehler nur verstecken.
+export function applyJfFrontmatter(markdown, jfReihe) {
+  if (!markdown || !jfReihe) return markdown;
+
+  const m = markdown.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/);
+  if (!m) return markdown;
+
+  const lines = m[1].split(/\r?\n/);
+  const out = [];
+  let sawKind = false;
+  let sawQuelle = false;
+
+  for (const line of lines) {
+    if (/^kind:/.test(line)) {
+      out.push("kind: jf");
+      out.push("jf_reihe: " + jfReihe);
+      sawKind = true;
+      continue;
+    }
+    // Ein vom Modell selbst gesetztes jf_reihe wird verworfen: gueltig ist
+    // nur der Slug aus dem Dropdown.
+    if (/^jf_reihe:/.test(line)) continue;
+    if (/^quelle:/.test(line)) {
+      out.push("quelle: claudia");
+      sawQuelle = true;
+      continue;
+    }
+    out.push(line);
+  }
+
+  if (!sawKind) {
+    const at = out.findIndex((l) => /^type:/.test(l));
+    out.splice(at + 1, 0, "kind: jf", "jf_reihe: " + jfReihe);
+  }
+  if (!sawQuelle) {
+    const at = out.findIndex((l) => /^transcription_model:/.test(l));
+    if (at === -1) out.push("quelle: claudia");
+    else out.splice(at, 0, "quelle: claudia");
+  }
+
+  const head = "---\n" + out.join("\n") + "\n---";
+  return head + markdown.slice(m[0].length - (m[2] ? m[2].length : 0));
+}
+
 export function buildMeetingPrompt(meta) {
   const secs = Math.round(meta.durationSec);
   const title = meta.title || fmtDe(meta.isoTimestamp);
@@ -364,14 +444,7 @@ ${buildMetaBlock(meta)}
 
 Gib exakt folgendes Markdown zurueck, nichts davor, nichts danach:
 
----
-type: voice-capture
-kind: meeting
-captured: ${meta.isoTimestamp}
-duration_sec: ${secs}
-title: ${title}
-transcription_model: gemini-2.5-flash
----
+${buildMeetingFrontmatter(meta, secs, title)}
 
 # Meeting: ${title}
 

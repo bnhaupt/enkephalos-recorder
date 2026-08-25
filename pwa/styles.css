@@ -466,6 +466,41 @@ main#app {
   pointer-events: none;
 }
 
+/* Pause sitzt ueber dem Stopp-Ring, deutlich anders geformt: eckig statt
+   rund, ruhig statt Beere. Wer im Gespraech gestoert wird, greift hastig --
+   die beiden Tasten duerfen sich nicht verwechseln lassen.
+   Leuchtbeere bleibt laut SK der laufenden Aufnahme vorbehalten, der
+   Pausenzustand wird deshalb ueber Beschriftung, eingefrorenen Timer und
+   toten Pegelring angezeigt, nicht ueber Farbe. */
+.pause-btn {
+  min-height: 64px;
+  min-width: min(58vw, 216px);
+  padding: 0 1.5rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.pause-btn:active:not(:disabled) { background: var(--bg-elev); }
+
+.pause-btn[aria-pressed="true"] {
+  border-color: var(--fg-muted);
+  background: var(--bg-elev);
+}
+
+.pause-btn:disabled {
+  color: var(--fg-dim);
+  cursor: not-allowed;
+}
+
 .ring-btn:active:not(:disabled) { background: #6B0A4C; }
 
 /* Deaktiviert heisst: Mikrofon startet noch. Statt Deckkraft zu senken

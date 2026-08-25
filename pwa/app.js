@@ -736,10 +736,13 @@ function pollAuftragStatusSoon() {
 // ---------- Recording lifecycle ----------
 
 // currentRec = {
-//   kind: "idea" | "meeting",
-//   screen: "idea" | "meeting",
-//   handle, startTs, timerId, levelEls
+//   kind: "idea" | "meeting" | "auftrag",
+//   screen: gleich kind,
+//   handle, timerId, finalizing
 // } | null
+//
+// Kein startTs: die aufgenommene Dauer kommt aus dem Recorder, weil nur der
+// weiss, wie lange pausiert wurde.
 let currentRec = null;
 
 function clearRecTimer() {
@@ -749,23 +752,100 @@ function clearRecTimer() {
   }
 }
 
+// ---------- Pause ----------
+//
+// Nur Notiz und Meeting. Der Auftrag bleibt bewusst ohne Pause: er ist ein
+// kurzes Diktat mit 5-Minuten-Deckel, kein Termin, in den hineingestoert
+// wird.
+//
+// Wichtig ist nicht die Taste, sondern was sie aussetzt: im Notiz-Modus
+// wuerde die Stille-Erkennung sonst genau waehrend der Stoerung zuschlagen
+// und die Aufnahme beenden. Das erledigt der Recorder (siehe recorder.js);
+// hier steht nur die Anzeige.
+const PAUSE_IDS = {
+  meeting: "meeting-pause",
+  idea: "idea-pause",
+};
+
+const PAUSE_HINTS = {
+  meeting: {
+    laeuft: "Bildschirm darf dunkel, aber nicht aus.",
+    pausiert: "Pausiert. Es wird nichts aufgenommen.",
+  },
+  idea: {
+    laeuft: "Aufnahme laeuft — einfach sprechen.",
+    pausiert: "Pausiert. Der Auto-Stopp ist ausgesetzt.",
+  },
+};
+
+function pauseButtonFor(kind) {
+  const id = PAUSE_IDS[kind];
+  return id ? document.getElementById(id) : null;
+}
+
+function setPausedUi(kind, paused) {
+  const btn = pauseButtonFor(kind);
+  if (btn) {
+    btn.textContent = paused ? "Weiter" : "Pause";
+    btn.setAttribute("aria-pressed", paused ? "true" : "false");
+  }
+
+  const texte = PAUSE_HINTS[kind];
+  if (!texte) return;
+  const hintEl = document.getElementById(
+    kind === "meeting" ? "meeting-note" : "idea-hint",
+  );
+  if (hintEl) hintEl.textContent = paused ? texte.pausiert : texte.laeuft;
+
+  // Die Zusatzzeile verspricht einen Auto-Stopp, den es waehrend der Pause
+  // nicht gibt.
+  if (kind === "idea") {
+    const sub = document.getElementById("idea-subhint");
+    if (sub) {
+      sub.textContent = paused
+        ? "Weiter antippen, um fortzusetzen."
+        : "Stoppt auch automatisch nach 3 Sekunden Stille.";
+    }
+  }
+}
+
+function togglePause(kind) {
+  if (!currentRec || currentRec.kind !== kind || currentRec.finalizing) return;
+  const handle = currentRec.handle;
+  const gewechselt = handle.isPaused() ? handle.resume() : handle.pause();
+  if (!gewechselt) {
+    toast("Pause nicht moeglich", { isError: true });
+    return;
+  }
+  setPausedUi(kind, handle.isPaused());
+}
+
+// Beim Beenden darf die Pausentaste nicht mehr greifen -- weder waehrend
+// des Titel-Dialogs noch waehrend des Speicherns.
+function lockPauseButton(kind) {
+  const btn = pauseButtonFor(kind);
+  if (btn) btn.disabled = true;
+}
+
 function resetMeetingUi() {
   const stopBtn = document.getElementById("meeting-stop");
   const timerEl = document.getElementById("meeting-timer");
-  const note = document.getElementById("meeting-note");
   if (stopBtn) stopBtn.disabled = true;
   if (timerEl) timerEl.textContent = "00:00";
-  if (note) note.textContent = "Bildschirm darf dunkel, aber nicht aus.";
+  const pauseBtn = pauseButtonFor("meeting");
+  if (pauseBtn) pauseBtn.disabled = true;
+  setPausedUi("meeting", false);
   setWaveformLevel(0);
 }
 
 function resetIdeaUi() {
-  const hint = document.getElementById("idea-hint");
-  if (hint) hint.textContent = "Aufnahme laeuft \u2014 einfach sprechen.";
   const stopBtn = document.getElementById("idea-stop");
   if (stopBtn) stopBtn.disabled = true;
   const timerEl = document.getElementById("idea-timer");
   if (timerEl) timerEl.textContent = "00:00";
+  const pauseBtn = pauseButtonFor("idea");
+  if (pauseBtn) pauseBtn.disabled = true;
+  setPausedUi("idea", false);
   setWaveformLevel(0);
 }
 
@@ -798,7 +878,9 @@ function tickTimer() {
   if (!currentRec) return;
   const timerEl = document.getElementById(TIMER_IDS[currentRec.kind] || "meeting-timer");
   if (!timerEl) return;
-  const sec = Math.floor((performance.now() - currentRec.startTs) / 1000);
+  // Der Recorder rechnet Pausen heraus; er ist damit die einzige Quelle
+  // fuer die aufgenommene Dauer. Wanduhrzeit waere hier falsch.
+  const sec = Math.floor(currentRec.handle.getDurationSec());
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
@@ -859,15 +941,15 @@ async function startRecScreen(kind) {
       kind,
       screen: kind,
       handle,
-      startTs: performance.now(),
       timerId: null,
     };
 
     if (kind === "meeting") {
       const stopBtn = document.getElementById("meeting-stop");
-      const note = document.getElementById("meeting-note");
       if (stopBtn) stopBtn.disabled = false;
-      if (note) note.textContent = "Bildschirm darf dunkel, aber nicht aus.";
+      const pauseBtn = pauseButtonFor("meeting");
+      if (pauseBtn) pauseBtn.disabled = false;
+      setPausedUi("meeting", false);
     } else if (kind === "auftrag") {
       resetAuftragUi();
       const auftragStop = document.getElementById("auftrag-stop");
@@ -876,6 +958,9 @@ async function startRecScreen(kind) {
       resetIdeaUi();
       const ideaStop = document.getElementById("idea-stop");
       if (ideaStop) ideaStop.disabled = false;
+      const ideaPause = pauseButtonFor("idea");
+      if (ideaPause) ideaPause.disabled = false;
+      setPausedUi("idea", false);
     }
 
     tickTimer();
@@ -898,6 +983,7 @@ async function finalizeAndSave(titleFromUser = null, participantsFromUser = null
   // koennen sich zeitlich ueberlappen).
   if (!currentRec || currentRec.finalizing) return;
   currentRec.finalizing = true;
+  lockPauseButton(currentRec.kind);
   const rec = currentRec;
   clearRecTimer();
 
@@ -956,6 +1042,7 @@ async function finalizeMeetingFlow() {
   clearRecTimer();
   const stopBtn = document.getElementById("meeting-stop");
   if (stopBtn) stopBtn.disabled = true;
+  lockPauseButton("meeting");
   const { title, participants, jfReihe } = await askForTitle();
   await finalizeAndSave(title, participants, jfReihe);
 }
@@ -1156,6 +1243,11 @@ function onHashChange() {
 }
 
 function bindButtons() {
+  for (const kind of Object.keys(PAUSE_IDS)) {
+    const btn = pauseButtonFor(kind);
+    if (btn) btn.addEventListener("click", () => togglePause(kind));
+  }
+
   const stopBtn = document.getElementById("meeting-stop");
   if (stopBtn) {
     stopBtn.addEventListener("click", () => {
@@ -1173,6 +1265,7 @@ function bindButtons() {
     ideaStopBtn.addEventListener("click", () => {
       if (!currentRec || currentRec.kind !== "idea") return;
       ideaStopBtn.disabled = true;
+      lockPauseButton("idea");
       finalizeAndSave().catch((err) => {
         console.error(err);
         toast("Speichern fehlgeschlagen", { isError: true });

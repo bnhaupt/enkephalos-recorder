@@ -58,6 +58,7 @@
           <div class="level-bar" aria-hidden="true"><i></i></div>
         </div>
 
+        <button type="button" id="meeting-pause" class="pause-btn" disabled aria-pressed="false">Pause</button>
         <button type="button" id="meeting-stop" class="ring-btn" disabled>Stopp</button>
         <p class="rec-note" id="meeting-note">Mikrofon wird initialisiert &hellip;</p>
       </div>
@@ -76,8 +77,9 @@
           <p id="idea-hint" class="idea-hint">Mikrofon wird initialisiert &hellip;</p>
         </div>
 
+        <button type="button" id="idea-pause" class="pause-btn" disabled aria-pressed="false">Pause</button>
         <button type="button" id="idea-stop" class="ring-btn" disabled>Stopp</button>
-        <p class="idea-subhint">Stoppt auch automatisch nach 3 Sekunden Stille.</p>
+        <p class="idea-subhint" id="idea-subhint">Stoppt auch automatisch nach 3 Sekunden Stille.</p>
       </div>
     </section>
 

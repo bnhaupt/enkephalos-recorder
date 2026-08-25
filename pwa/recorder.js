@@ -12,7 +12,10 @@
 //   Handle = {
 //     stop(): Promise<{ blob, mimeType, durationSec }>,
 //     cancel(): void,    // stream + recorder teardown ohne Blob
-//     getDurationSec(): number
+//     pause(): boolean,  // true, wenn der Zustand gewechselt hat
+//     resume(): boolean,
+//     isPaused(): boolean,
+//     getDurationSec(): number   // Pausen sind herausgerechnet
 //   }
 
 const PREFERRED_MIME_TYPES = [
@@ -97,8 +100,16 @@ export async function startRecording(opts) {
   let finished = false;
   let cancelled = false;
 
+  // Pausen-Buchhaltung. MediaRecorder.pause()/resume() liefert einen
+  // durchgehenden, gueltigen Container -- anders als ein nachtraeglicher
+  // Byte-Schnitt, der genau daran scheiterte.
+  let pausedTotalMs = 0;
+  let pausedAt = null;
+
   function getDurationSec() {
-    return Math.max(0, (performance.now() - startTs) / 1000);
+    const laufendePause = pausedAt == null ? 0 : performance.now() - pausedAt;
+    const netto = performance.now() - startTs - pausedTotalMs - laufendePause;
+    return Math.max(0, netto / 1000);
   }
 
   function cleanupAnalysis() {
@@ -122,20 +133,33 @@ export async function startRecording(opts) {
     }
   }
 
-  function clearMaxTimer() {
-    if (maxTimeoutId != null) clearTimeout(maxTimeoutId);
-    maxTimeoutId = null;
-  }
+  // Hard max duration. Die Obergrenze zaehlt aufgenommene Zeit, nicht
+  // Wanduhrzeit -- eine Pause verlaengert das Zeitfenster entsprechend.
+  let maxRestMs = maxDurationSec > 0 ? maxDurationSec * 1000 : 0;
+  let maxArmedAt = null;
 
-  // Hard max duration
-  if (maxDurationSec > 0) {
+  function armMaxTimer() {
+    if (!(maxRestMs > 0) || finished || cancelled) return;
+    maxArmedAt = performance.now();
     maxTimeoutId = setTimeout(() => {
       if (finished) return;
       finished = true;
       try { recorder.stop(); } catch {}
       if (onAutoStop) onAutoStop("maxDuration");
-    }, maxDurationSec * 1000);
+    }, maxRestMs);
   }
+
+  function disarmMaxTimer() {
+    if (maxTimeoutId == null) return;
+    clearTimeout(maxTimeoutId);
+    maxTimeoutId = null;
+    if (maxArmedAt != null) {
+      maxRestMs = Math.max(0, maxRestMs - (performance.now() - maxArmedAt));
+      maxArmedAt = null;
+    }
+  }
+
+  armMaxTimer();
 
   // Optional live-level + silence detection
   if (onLevel || silence) {
@@ -157,6 +181,18 @@ export async function startRecording(opts) {
 
       const tick = () => {
         if (finished || cancelled) return;
+
+        // Waehrend der Pause liefert der Analyser Stille. Liefe die
+        // Stille-Erkennung weiter, beendete sie die Aufnahme genau dann,
+        // wenn der Nutzer sie bewusst angehalten hat -- also im Moment der
+        // Stoerung, gegen die die Pause gedacht ist.
+        if (pausedAt != null) {
+          silenceStart = null;
+          if (onLevel) { try { onLevel(0); } catch {} }
+          rafId = requestAnimationFrame(tick);
+          return;
+        }
+
         analyser.getFloatTimeDomainData(buf);
         let sum = 0;
         for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
@@ -178,7 +214,7 @@ export async function startRecording(opts) {
             if (silenceStart == null) silenceStart = performance.now();
             else if (performance.now() - silenceStart >= silenceMs) {
               finished = true;
-              clearMaxTimer();
+              disarmMaxTimer();
               try { recorder.stop(); } catch {}
               if (onAutoStop) onAutoStop("silence");
               return;
@@ -198,12 +234,38 @@ export async function startRecording(opts) {
   return {
     getDurationSec,
 
+    isPaused() {
+      return pausedAt != null;
+    },
+
+    // Geben true zurueck, wenn der Zustand tatsaechlich gewechselt hat.
+    // Der Aufrufer richtet seine Anzeige danach aus, statt einen eigenen
+    // Zustand mitzufuehren, der auseinanderlaufen koennte.
+    pause() {
+      if (finished || cancelled || pausedAt != null) return false;
+      if (recorder.state !== "recording") return false;
+      try { recorder.pause(); } catch { return false; }
+      pausedAt = performance.now();
+      disarmMaxTimer();
+      if (onLevel) { try { onLevel(0); } catch {} }
+      return true;
+    },
+
+    resume() {
+      if (finished || cancelled || pausedAt == null) return false;
+      try { recorder.resume(); } catch { return false; }
+      pausedTotalMs += performance.now() - pausedAt;
+      pausedAt = null;
+      armMaxTimer();
+      return true;
+    },
+
     async stop() {
       if (finished || cancelled) {
         // Falls bereits durch Auto-Stop ausgeloest, auf stopped warten.
       } else {
         finished = true;
-        clearMaxTimer();
+        disarmMaxTimer();
         try { recorder.stop(); } catch {}
       }
       await stopped;
@@ -219,7 +281,7 @@ export async function startRecording(opts) {
       if (cancelled) return;
       cancelled = true;
       finished = true;
-      clearMaxTimer();
+      disarmMaxTimer();
       cleanupAnalysis();
       if (recorder.state !== "inactive") {
         try { recorder.stop(); } catch {}

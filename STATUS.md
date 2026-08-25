@@ -14,8 +14,8 @@ Handarbeit im Dialog und ausdruecklich nicht Teil dieser Pipeline.
 
 | Weg | Erfassung | Verarbeitung | Drive-Ordner |
 |---|---|---|---|
-| **Notiz** | Pixel, ein Tap, Auto-Stopp nach 3 s Stille oder 2 Min | Gemini, inline | `Enkephalos-Inbox` |
-| **Meeting** | Pixel, Start/Stopp, danach Kategorie + Zusatz + Teilnehmer, Deckel 65 Min | Gemini, Files API | `Enkephalos-Inbox` |
+| **Notiz** | Pixel, ein Tap, Auto-Stopp nach 3 s Stille oder 2 Min, Pause moeglich | Gemini, inline | `Enkephalos-Inbox` |
+| **Meeting** | Pixel, Start/Stopp/Pause, danach Kategorie + Zusatz + Teilnehmer, Deckel 65 Min | Gemini, Files API | `Enkephalos-Inbox` |
 | **Auftrag** | Pixel, diktiert, Auto-Stopp nach 5 s Stille oder 5 Min | Gemini strukturiert, **Claude Code headless auf dem Laptop erledigt ihn** | `Enkephalos-Auftraege` |
 | **Handschrift** | reMarkable, Export nach Drive | **Claude Code headless** liest die PDF | `Enkephalos-Handschrift` |
 
@@ -48,6 +48,14 @@ Reasoning-Aufgaben), die kurzen Modi `thinkingBudget: 0`.
 
 **Ein Meeting = ein Request, unabhaengig von der Laenge.** Flash fasst rund
 eine Stunde. Es gibt bewusst keinen Split (siehe "Bewusst nicht da").
+
+**Pause** gibt es in Notiz und Meeting, nicht im Auftrag (kurzes Diktat mit
+5-Minuten-Deckel, kein Termin, in den hineingestoert wird). Sie nutzt
+`MediaRecorder.pause()`/`resume()` und liefert damit einen durchgehend
+gueltigen Container. Entscheidend ist, was sie aussetzt: die
+Stille-Erkennung wuerde sonst genau waehrend der Stoerung zuschlagen und
+die Notiz beenden. Auch der Laengen-Deckel zaehlt aufgenommene Zeit, nicht
+Wanduhrzeit, und der Timer steht waehrend der Pause still.
 
 **JF-Zuordnung:** Meeting-Kategorien mit `jf `-Praefix erzeugen
 `kind: jf` + `jf_reihe: <slug>` + `quelle: claudia` in der Frontmatter —

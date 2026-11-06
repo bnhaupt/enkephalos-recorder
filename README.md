@@ -1,6 +1,6 @@
 # Enkephalos Voice Pipeline
 
-Eine Progressive Web App fuer das Pixel 7 Pro, die kurze Notizen und Meetings bis 1 Stunde aufzeichnet, per Gemini 2.5 Flash transkribiert und strukturiert, und die Ergebnisse in das Enkephalos-Vault einspeist.
+Eine Progressive Web App fuer das Pixel 7 Pro, die kurze Notizen und Meetings bis 1 Stunde aufzeichnet, per Gemini Flash transkribiert und strukturiert, und die Ergebnisse in das Enkephalos-Vault einspeist.
 
 ## Was es macht
 

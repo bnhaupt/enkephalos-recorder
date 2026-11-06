@@ -1,4 +1,4 @@
-// gemini.js — Google Gemini 2.5 Flash Client
+// gemini.js — Google Gemini Flash Client
 //
 // Nutzt die Consumer-API (generativelanguage.googleapis.com):
 //   1. Audio-Blob via Files API resumable hochladen
@@ -8,6 +8,12 @@
 
 const BASE = "https://generativelanguage.googleapis.com";
 
+// Einzige Quelle fuer den Modellnamen: API-Call, Prompt-Frontmatter und
+// Datensatz ziehen ihn von hier. Google sperrt abgekuendigte Modelle fuer
+// neue Keys schon vor dem Abschaltdatum (2.5 Flash: Fehler "no longer
+// available" auf neuem Geraet, 11/2026) — dann nur diese Zeile aendern.
+export const GEMINI_MODEL = "gemini-3.8-flash";
+
 const SAFETY_SETTINGS = [
   { category: "HARM_CATEGORY_HARASSMENT",        threshold: "BLOCK_ONLY_HIGH" },
   { category: "HARM_CATEGORY_HATE_SPEECH",       threshold: "BLOCK_ONLY_HIGH" },
@@ -15,26 +21,29 @@ const SAFETY_SETTINGS = [
   { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
 ];
 
-// temperature 0 + thinkingBudget 0: Transkription braucht weder Kreativitaet
-// noch Vorab-Reasoning; beides kostet nur Latenz bzw. erhoeht Halluzinationsrisiko.
+// temperature 0 + niedrigste Denkstufe: Transkription braucht weder
+// Kreativitaet noch Vorab-Reasoning; beides kostet nur Latenz bzw. erhoeht
+// Halluzinationsrisiko. Ab Gemini 3 heisst der Regler thinkingLevel statt
+// thinkingBudget; 3.8 Flash kennt LOW/MEDIUM/HIGH, MINIMAL liefert einen
+// Fehler, ganz abschalten geht nicht mehr.
 const GENERATION_CONFIG = {
   temperature: 0,
   topP: 0.95,
   maxOutputTokens: 8192,
   responseMimeType: "text/plain",
-  thinkingConfig: { thinkingBudget: 0 },
+  thinkingConfig: { thinkingLevel: "LOW" },
 };
 
 // Meeting: Diarisierung (Sprecher ueber die Zeit konsistent halten) und die
-// Synthese des Kurzueberblicks SIND Reasoning-Aufgaben -> Thinking dynamisch
-// aktiv. Hoeheres Output-Limit, damit lange Transkripte nicht abgeschnitten
-// werden.
+// Synthese des Kurzueberblicks SIND Reasoning-Aufgaben -> kein thinkingConfig,
+// das Modell denkt dann dynamisch auf seiner Standardstufe. Hoeheres
+// Output-Limit, damit lange Transkripte nicht abgeschnitten werden
+// (65536 ist zugleich das Maximum von 3.8 Flash).
 const MEETING_GENERATION_CONFIG = {
   temperature: 0,
   topP: 0.95,
   maxOutputTokens: 65536,
   responseMimeType: "text/plain",
-  thinkingConfig: { thinkingBudget: -1 },
 };
 
 // Auftrag: Das Diktat wird nicht nur transkribiert, sondern in einen
@@ -47,7 +56,6 @@ const AUFTRAG_GENERATION_CONFIG = {
   topP: 0.95,
   maxOutputTokens: 16384,
   responseMimeType: "text/plain",
-  thinkingConfig: { thinkingBudget: -1 },
 };
 
 const CONFIG_BY_KIND = {
@@ -259,7 +267,7 @@ type: voice-capture
 kind: idea
 captured: ${meta.isoTimestamp}
 duration_sec: ${secs}
-transcription_model: gemini-2.5-flash
+transcription_model: ${GEMINI_MODEL}
 ---
 
 # Notiz ${human}
@@ -327,7 +335,7 @@ kind: <recherche|klinisch|vault|dokument>
 captured: ${meta.isoTimestamp}
 duration_sec: ${secs}
 titel: <knappe Sachbezeichnung>
-transcription_model: gemini-2.5-flash
+transcription_model: ${GEMINI_MODEL}
 status: offen
 ---
 
@@ -372,7 +380,7 @@ ${kindLines}
 captured: ${meta.isoTimestamp}
 duration_sec: ${secs}
 title: ${title}${quelleLine}
-transcription_model: gemini-2.5-flash
+transcription_model: ${GEMINI_MODEL}
 ---`;
 }
 

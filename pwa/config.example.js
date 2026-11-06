@@ -10,7 +10,7 @@
 export const CONFIG = {
   // Gemini API
   GEMINI_API_KEY: "DEIN_GEMINI_API_KEY_HIER",
-  GEMINI_MODEL: "gemini-2.5-flash",
+  GEMINI_MODEL: "gemini-3.8-flash",
 
   // Google Drive OAuth
   GOOGLE_OAUTH_CLIENT_ID: "DEINE_CLIENT_ID.apps.googleusercontent.com",

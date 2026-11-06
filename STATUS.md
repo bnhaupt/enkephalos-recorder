@@ -37,14 +37,23 @@ Meeting nimmt mit 96 kbps und **abgeschalteter** Rauschunterdrueckung /
 AGC / Echo-Cancellation auf — das erhaelt Sprecher-Cues und leise Stimmen.
 Notiz und Auftrag mit 32 kbps und eingeschalteter Aufbereitung.
 
-**Transkription** (`gemini.js`): `gemini-2.5-flash`, `temperature 0`,
+**Transkription** (`gemini.js`): `gemini-3.8-flash` (Konstante
+`GEMINI_MODEL`, einzige Quelle fuer den Modellnamen), `temperature 0`,
 Safety durchgaengig `BLOCK_ONLY_HIGH`. Kurze Aufnahmen laufen inline
 (1 Request), Meetings ueber die Files API. Prompts sind deutsch und tragen
 einen verbindlichen Anti-Halluzinations-Block: nichts erfinden,
 `[unverstaendlich]` statt raten, "Keine." statt Ausfuellzwang bei
-Entscheidungen und Todos. Meeting bekommt `thinkingBudget: -1` und
-`maxOutputTokens: 65536` (Diarisierung und Themen-Synthese sind
-Reasoning-Aufgaben), die kurzen Modi `thinkingBudget: 0`.
+Entscheidungen und Todos. Meeting und Auftrag laufen ohne
+`thinkingConfig`, also auf der dynamischen Standard-Denkstufe des Modells
+(Diarisierung und Themen-Synthese sind Reasoning-Aufgaben), Meeting mit
+`maxOutputTokens: 65536`. Die Notiz laeuft mit `thinkingLevel: "LOW"` —
+die niedrigste Stufe, die 3.8 Flash kennt; `MINIMAL` und das fruehere
+`thinkingBudget: 0` gibt es dort nicht mehr.
+
+**Modellwechsel:** Google sperrt abgekuendigte Modelle fuer neu erzeugte
+Keys schon vor dem Abschaltdatum. Symptom: Key wird angenommen, die
+Transkription scheitert mit "no longer available". Dann `GEMINI_MODEL`
+in `gemini.js` umstellen und die Denkstufen gegen die Modellseite pruefen.
 
 **Ein Meeting = ein Request, unabhaengig von der Laenge.** Flash fasst rund
 eine Stunde. Es gibt bewusst keinen Split (siehe "Bewusst nicht da").

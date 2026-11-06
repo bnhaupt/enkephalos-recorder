@@ -18,6 +18,7 @@ import {
   buildMeetingPrompt,
   buildAuftragPrompt,
   applyJfFrontmatter,
+  GEMINI_MODEL,
 } from "./gemini.js";
 import {
   hasGis,
@@ -66,7 +67,6 @@ const DEFAULTS = {
   AUFTRAG_SILENCE_DURATION_MS: 5000,
 };
 
-const GEMINI_MODEL = "gemini-2.5-flash";
 const CONFIG_KEY_GEMINI = "gemini_api_key";
 const CONFIG_KEY_LAST_CATEGORY = "last_meeting_category";
 // Teilnehmer werden je Kategorie gemerkt: wiederkehrende Jour-Fixe haben
@@ -366,7 +366,7 @@ async function getOrAskApiKey() {
 // inline_data-Limit: 20MB pro Request inkl. Base64-Overhead (+33%).
 const INLINE_MAX_BYTES = 14 * 1024 * 1024;
 
-// Kein Audio-Split mehr: Gemini 2.5 Flash fasst ~1h Audio (~100k Token) in
+// Kein Audio-Split mehr: Gemini Flash fasst ~1h Audio (~100k Token) in
 // einem Request. Die fruehere Byte-Teilung des WebM-Containers erzeugte einen
 // nicht dekodierbaren zweiten Teil (kein EBML-Header) -> Datenverlust in der
 // hinteren Haelfte. Lange Meetings laufen jetzt als ein einziger Files-API-Call.

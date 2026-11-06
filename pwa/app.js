@@ -19,6 +19,7 @@ import {
   buildAuftragPrompt,
   applyJfFrontmatter,
   GEMINI_MODEL,
+  runDiagnostics,
 } from "./gemini.js";
 import {
   hasGis,
@@ -1423,6 +1424,70 @@ async function maybeResetDrive() {
   history.replaceState(null, "", location.pathname + location.hash);
 }
 
+// ---------- Diagnose via ?diag ----------
+//
+// Zeigt im Transkript-Fenster, was Google mit dem gespeicherten Key und der
+// juengsten Notiz tatsaechlich antwortet. Fuer den Fall "Transkription geht
+// nicht und der Fehlertext erklaert es nicht" — und zum Vergleich zweier
+// Geraete nebeneinander.
+
+async function maybeRunDiag() {
+  if (!new URLSearchParams(location.search).has("diag")) return;
+  history.replaceState(null, "", location.pathname + location.hash);
+  const modal = document.getElementById("md-modal");
+  const titleEl = document.getElementById("md-title");
+  const body = document.getElementById("md-body");
+  const actions = document.getElementById("md-actions");
+  if (!modal || !titleEl || !body) return;
+  mdCurrentId = null;
+  titleEl.textContent = "Diagnose";
+  body.classList.remove("is-error");
+  body.textContent = "";
+  if (actions) actions.hidden = true;
+  modal.hidden = false;
+  const log = (line) => {
+    body.textContent += line + "\n";
+    body.scrollTop = body.scrollHeight;
+  };
+
+  let wakeLock = null;
+  try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
+  try {
+    log(`Claudia-Diagnose, ${new Date().toLocaleString("de-DE")}`);
+    const chrome = (navigator.userAgent.match(/Chrome\/[\d.]+/) || ["Browser unbekannt"])[0];
+    log(`${chrome}, Netz: ${navigator.connection?.effectiveType || "?"}`);
+    log("Bitte die App offen lassen, das dauert bis zu vier Minuten.");
+
+    const stored = await dbGet(STORE_CONFIG, CONFIG_KEY_GEMINI);
+    if (!stored || !stored.value) {
+      log("\nKein Gemini-Key gespeichert. Erst eine Notiz aufnehmen und den Key eingeben.");
+      return;
+    }
+    const items = (await dbGetAll(STORE_RECORDINGS))
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+    const recordings = items.slice(0, 5).map((r) =>
+      `${fmtTime(r.createdAt)} ${KIND_LABEL[r.kind] || r.kind} ${fmtDuration(r.durationSec)}`
+      + ` ${r.audioBlob ? Math.round(r.audioBlob.size / 1024) + " kB " + (r.audioBlob.type || "ohne Typ") : "ohne Audio"}`
+      + ` -> ${r.status}${r.errorMessage ? ": " + String(r.errorMessage).replace(/\s+/g, " ").slice(0, 80) : ""}`,
+    );
+    const rec = items
+      .find((r) => r.kind === "idea" && r.audioBlob && r.audioBlob.size <= INLINE_MAX_BYTES);
+    await runDiagnostics(stored.value, {
+      recordings,
+      blob: rec ? rec.audioBlob : null,
+      promptText: rec ? buildIdeaPrompt({
+        isoTimestamp: rec.createdAt,
+        durationSec: rec.durationSec,
+        title: rec.title,
+      }) : null,
+    }, log);
+  } catch (err) {
+    log(`\nDiagnose abgebrochen: ${err && err.message ? err.message : err}`);
+  } finally {
+    try { await wakeLock?.release(); } catch {}
+  }
+}
+
 // ---------- Init ----------
 
 // Persistenten Speicher anfordern, sonst darf Chrome die IndexedDB
@@ -1443,12 +1508,33 @@ async function requestPersistentStorage() {
   }
 }
 
+// Wird die App waehrend einer Transkription neu geladen (Service-Worker-
+// Update, Reset-Link, Chrome raeumt den Tab), bleibt der Datensatz auf
+// "transcribing" stehen: kein Prozess laeuft mehr, das Modal sagt "laeuft",
+// und weder Liste noch Modal bieten einen Retry an. Beim Start deshalb alle
+// solchen Leichen auf "error" setzen — der Audio-Blob ist noch da, "Erneut
+// transkribieren" fuehrt weiter.
+async function repairInterruptedRecordings() {
+  const all = await dbGetAll(STORE_RECORDINGS);
+  for (const rec of all) {
+    if (rec.status === "transcribing") {
+      await updateRecordingRecord(rec.id, {
+        status: "error",
+        errorMessage: "Unterbrochen: App wurde waehrend der Transkription neu geladen",
+      });
+    }
+  }
+}
+
 async function init() {
   try {
     await openDb();
   } catch (err) {
     console.error("IndexedDB-Init fehlgeschlagen:", err);
   }
+  await repairInterruptedRecordings().catch((err) =>
+    console.error("Reparatur unterbrochener Aufnahmen fehlgeschlagen:", err),
+  );
   await requestPersistentStorage();
   await maybeResetDrive();
   await maybeResetGemini();
@@ -1457,6 +1543,7 @@ async function init() {
   );
   bindButtons();
   window.addEventListener("hashchange", onHashChange);
+  maybeRunDiag().catch((err) => console.error("Diagnose fehlgeschlagen:", err));
   await updateDriveBanner();
 
   // Token-Client vorbereiten. (requestAccessToken wird erst bei

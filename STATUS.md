@@ -191,7 +191,11 @@ Nicht alles auf einmal.
 `docs/troubleshooting.md` — Schnell-Checks pro Pipeline-Stufe,
 Key/Token-Landkarte, haeufige Fehlerbilder, Reset-Pfade.
 Reset-Pfade in der PWA: `?reset-drive`, `?reset-gemini` (beide mit
-Rueckfrage).
+Rueckfrage). **`?diag`** misst auf dem Geraet mit dem gespeicherten Key und
+der juengsten Notiz: Key-Fingerabdruck, Chrome-Version, letzte Aufnahmen,
+Modell-Liste, und Googles Rohantwort auf Text, echte Aufnahme und ein
+byteidentisches Kunst-Audio. Auf zwei Geraeten nebeneinander ausgefuehrt,
+trennt es Key, Audio und Browser als Ursache.
 
 ---
 

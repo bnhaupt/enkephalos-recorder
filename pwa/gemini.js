@@ -182,7 +182,13 @@ async function postGenerate(url, body, timeoutMs) {
       signal: ctrl.signal,
     });
     if (!res.ok) {
-      const err = new Error(`generateContent ${res.status}: ${await readErr(res)}`);
+      const detail = await readErr(res);
+      // readErr schluckt auch den Abbruch beim Lesen des Fehlertexts; sonst
+      // wuerde ein Timeout als wiederholbare 5xx umgedeutet (Codex-Review).
+      if (ctrl.signal.aborted) {
+        const e = new Error("aborted"); e.name = "AbortError"; throw e;
+      }
+      const err = new Error(`generateContent ${res.status}: ${detail}`);
       err.retryable = RETRY_STATUS.has(res.status);
       throw err;
     }
@@ -273,6 +279,145 @@ export async function generateContentInline(apiKey, model, blob, promptText, { k
     { inline_data: { mime_type: blob.type || "audio/webm", data } },
     { text: promptText },
   ], kind);
+}
+
+// ---------- Diagnose (?diag) ----------
+//
+// Misst auf dem Geraet, mit dem gespeicherten Key und einer echten Aufnahme,
+// was Google tatsaechlich antwortet und wie schnell. Jeder Aufruf genau ein
+// Versuch, ohne Wiederholung — hier soll der Rohbefund sichtbar werden.
+// Auf zwei Geraeten nebeneinander ausgefuehrt, trennt es Key, Audio und
+// Browser als Ursache einer Geraete-Asymmetrie.
+
+const DIAG_MODELS = [GEMINI_MODEL, "gemini-3.6-flash", "gemini-3.5-flash-lite"];
+
+async function diagCall(apiKey, model, parts, generationConfig, timeoutMs) {
+  const url =
+    `${BASE}/v1beta/models/${encodeURIComponent(model)}:generateContent` +
+    `?key=${encodeURIComponent(apiKey)}`;
+  const body = { contents: [{ parts }], safetySettings: SAFETY_SETTINGS };
+  if (generationConfig) body.generationConfig = generationConfig;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const t0 = Date.now();
+  const secs = () => `${((Date.now() - t0) / 1000).toFixed(1)} s`;
+  const flat = (s) => String(s).replace(/\s+/g, " ").trim();
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    const txt = await res.text();
+    if (!res.ok) return `FEHLER ${res.status} nach ${secs()}: ${flat(txt).slice(0, 240)}`;
+    let out = "";
+    let extra = "";
+    try {
+      const d = JSON.parse(txt);
+      const c = d.candidates?.[0];
+      out = (c?.content?.parts || []).map((p) => p.text || "").join("");
+      const u = d.usageMetadata || {};
+      extra = ` [${c?.finishReason || "?"}, Ausgabe ${u.candidatesTokenCount ?? "?"} Token, Denken ${u.thoughtsTokenCount ?? 0} Token]`;
+    } catch {}
+    return `OK nach ${secs()}${extra}: ${flat(out).slice(0, 70)}`;
+  } catch (err) {
+    if (err && err.name === "AbortError") return `KEINE ANTWORT, nach ${secs()} abgebrochen`;
+    return `VERBINDUNGSFEHLER nach ${secs()}: ${err && err.message ? err.message : err}`;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 1 s Stille, 16 kHz mono 16 bit: schliesst das Aufnahmeformat als Ursache aus.
+function silentWavBlob() {
+  const samples = 16000;
+  const buf = new ArrayBuffer(44 + samples * 2);
+  const v = new DataView(buf);
+  const str = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
+  str(0, "RIFF"); v.setUint32(4, 36 + samples * 2, true); str(8, "WAVE");
+  str(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, "data"); v.setUint32(40, samples * 2, true);
+  return new Blob([buf], { type: "audio/wav" });
+}
+
+// Fingerabdruck des Keys: Endung plus 8 Hex des SHA-256. Reicht, um zwei
+// Geraete zu vergleichen, verraet den Key nicht.
+async function keyFingerprint(apiKey) {
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(apiKey));
+    const hex = Array.from(new Uint8Array(digest).slice(0, 4)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    return `…${apiKey.slice(-4)} (SHA ${hex}, Laenge ${apiKey.length})`;
+  } catch {
+    return `…${apiKey.slice(-4)} (Laenge ${apiKey.length})`;
+  }
+}
+
+export async function runDiagnostics(apiKey, { blob, promptText, recordings = [] } = {}, log) {
+  log(`Modell der App: ${GEMINI_MODEL}`);
+  log(`Key: ${await keyFingerprint(apiKey)}`);
+
+  if (recordings.length) {
+    log("\nLetzte Aufnahmen auf diesem Geraet:");
+    for (const r of recordings) log(`  ${r}`);
+  }
+
+  log("\n1. Welche Modelle kennt dieser Key?");
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    const res = await fetch(
+      `${BASE}/v1beta/models?pageSize=1000&key=${encodeURIComponent(apiKey)}`,
+      { signal: ctrl.signal },
+    );
+    clearTimeout(timer);
+    if (!res.ok) {
+      log(`  FEHLER ${res.status}: ${(await readErr(res)).replace(/\s+/g, " ").slice(0, 240)}`);
+    } else {
+      const data = await res.json();
+      const names = (data.models || []).map((m) => String(m.name || "").replace(/^models\//, ""));
+      for (const m of [...DIAG_MODELS, "gemini-2.5-flash"]) {
+        log(`  ${m}: ${names.includes(m) ? "gelistet" : "NICHT gelistet"}`);
+      }
+    }
+  } catch (err) {
+    log(`  VERBINDUNGSFEHLER: ${err && err.message ? err.message : err}`);
+  }
+
+  log("\n2. Reine Textanfrage (ohne Audio)");
+  log(`  ${GEMINI_MODEL}: ` + await diagCall(
+    apiKey, GEMINI_MODEL, [{ text: "Antworte nur mit dem Wort OK." }], null, 20000,
+  ));
+
+  let parts = null;
+  if (blob) {
+    log(`\n3. Echte Aufnahme dieses Geraets (${Math.round(blob.size / 1024)} kB, ${blob.type || "ohne Typ"})`);
+    const data = await blobToBase64(blob);
+    parts = [
+      { inline_data: { mime_type: blob.type || "audio/webm", data } },
+      { text: promptText },
+    ];
+    log(`  ${GEMINI_MODEL}: ` + await diagCall(apiKey, GEMINI_MODEL, parts, GENERATION_CONFIG, 45000));
+  } else {
+    log("\n3. Keine gespeicherte Notiz mit Audio vorhanden, uebersprungen.");
+  }
+
+  log("\n4. Kunst-Audio (1 s Stille, WAV, auf jedem Geraet byteidentisch)");
+  const wav = await blobToBase64(silentWavBlob());
+  log(`  ${GEMINI_MODEL}: ` + await diagCall(apiKey, GEMINI_MODEL, [
+    { inline_data: { mime_type: "audio/wav", data: wav } },
+    { text: "Transkribiere diese Aufnahme. Wenn sie stumm ist, antworte nur: STILLE." },
+  ], GENERATION_CONFIG, 30000));
+
+  if (parts) {
+    log("\n5. Echte Aufnahme bei den Nachbarmodellen");
+    for (const model of DIAG_MODELS.slice(1)) {
+      log(`  ${model}: ` + await diagCall(apiKey, model, parts, GENERATION_CONFIG, 45000));
+    }
+  }
+
+  log("\nFertig.");
 }
 
 // ---------- Prompts ----------

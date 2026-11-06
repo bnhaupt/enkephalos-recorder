@@ -50,6 +50,14 @@ Entscheidungen und Todos. Meeting und Auftrag laufen ohne
 die niedrigste Stufe, die 3.8 Flash kennt; `MINIMAL` und das fruehere
 `thinkingBudget: 0` gibt es dort nicht mehr.
 
+**Zeitgrenze und Wiederholung:** Jeder `generateContent`-Versuch hat eine
+Zeitgrenze (Notiz 45 s, Auftrag 2 Min, Meeting 15 Min). Bei 5xx,
+Netzabbruch ("Failed to fetch") oder Zeitueberschreitung folgen bis zu
+zwei weitere Versuche nach 2 s und 5 s Pause; 4xx (Key, Kontingent,
+Modell) wird nicht wiederholt, ein Meeting-Timeout auch nicht.
+`temperature`/`topP` stehen noch im Request, werden von Modellen ab 3.6
+laut Google aber ignoriert.
+
 **Modellwechsel:** Google sperrt abgekuendigte Modelle fuer neu erzeugte
 Keys schon vor dem Abschaltdatum. Symptom: Key wird angenommen, die
 Transkription scheitert mit "no longer available". Dann `GEMINI_MODEL`

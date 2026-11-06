@@ -155,24 +155,86 @@ export async function deleteFile(apiKey, fileName) {
   }
 }
 
-async function callGenerate(apiKey, model, parts, kind) {
+// Wie lange ein einzelner Versuch auf die Antwort warten darf. generateContent
+// antwortet erst, wenn alles fertig ist; ohne Grenze haengt eine Notiz
+// minutenlang an einem ueberlasteten Server und endet dann doch nur mit
+// "Failed to fetch". Die Werte liegen weit ueber der normalen Laufzeit.
+const TIMEOUT_MS_BY_KIND = {
+  idea: 45 * 1000,
+  auftrag: 2 * 60 * 1000,
+  meeting: 15 * 60 * 1000,
+};
+
+// Google stuft 5xx ("model is overloaded") ausdruecklich als voruebergehend
+// ein und empfiehlt Wiederholen mit Pause. 4xx (Key, Kontingent, Modell)
+// wird nicht wiederholt — das aendert sich durch Warten nicht.
+const RETRY_STATUS = new Set([500, 502, 503, 504]);
+const RETRY_PAUSES_MS = [2000, 5000];
+
+async function postGenerate(url, body, timeoutMs) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const err = new Error(`generateContent ${res.status}: ${await readErr(res)}`);
+      err.retryable = RETRY_STATUS.has(res.status);
+      throw err;
+    }
+    return await res.json();
+  } catch (err) {
+    if (err && err.name === "AbortError") {
+      const e = new Error(`Keine Antwort von Gemini nach ${Math.round(timeoutMs / 1000)} s`);
+      // Ein Meeting, das 15 Min ohne Antwort blieb, nicht noch zweimal
+      // 15 Min haengen lassen — dort entscheidet der Nutzer ueber den Retry.
+      e.retryable = timeoutMs <= TIMEOUT_MS_BY_KIND.auftrag;
+      throw e;
+    }
+    // fetch wirft TypeError ("Failed to fetch") bei Netzabbruch — und auch
+    // dann, wenn Google einen 5xx ohne CORS-Header liefert.
+    if (err instanceof TypeError) {
+      const e = new Error(`Verbindung zu Gemini abgebrochen (${err.message})`);
+      e.retryable = true;
+      throw e;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function callGenerate(apiKey, model, parts, kind, { timeoutMs } = {}) {
   const url =
     `${BASE}/v1beta/models/${encodeURIComponent(model)}:generateContent` +
     `?key=${encodeURIComponent(apiKey)}`;
-  const body = {
+  const body = JSON.stringify({
     contents: [{ parts }],
     generationConfig: CONFIG_BY_KIND[kind] || GENERATION_CONFIG,
     safetySettings: SAFETY_SETTINGS,
-  };
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    throw new Error(`generateContent ${res.status}: ${await readErr(res)}`);
+  const limit = timeoutMs || TIMEOUT_MS_BY_KIND[kind] || TIMEOUT_MS_BY_KIND.idea;
+
+  let data;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      data = await postGenerate(url, body, limit);
+      break;
+    } catch (err) {
+      if (!err.retryable || attempt >= RETRY_PAUSES_MS.length) {
+        if (err.retryable) {
+          err.message += ` — ${attempt + 1} Versuche. Google-Server ueberlastet oder Netz instabil; spaeter „Erneut transkribieren“.`;
+        }
+        throw err;
+      }
+      console.warn(`Gemini-Versuch ${attempt + 1} gescheitert, wiederhole:`, err.message);
+      await new Promise((r) => setTimeout(r, RETRY_PAUSES_MS[attempt]));
+    }
   }
-  const data = await res.json();
   const candidate = data.candidates?.[0];
   if (!candidate) {
     const block = data.promptFeedback?.blockReason;
@@ -187,11 +249,11 @@ async function callGenerate(apiKey, model, parts, kind) {
   return text;
 }
 
-export async function generateContent(apiKey, model, file, promptText, { kind = "idea" } = {}) {
+export async function generateContent(apiKey, model, file, promptText, { kind = "idea", timeoutMs } = {}) {
   return callGenerate(apiKey, model, [
     { file_data: { file_uri: file.uri, mime_type: file.mimeType } },
     { text: promptText },
-  ], kind);
+  ], kind, { timeoutMs });
 }
 
 function blobToBase64(blob) {

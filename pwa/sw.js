@@ -5,7 +5,7 @@
 // - Update-Prompt bei neuer Version
 // - Offline-Fallback
 
-const CACHE_NAME = "enkephalos-recorder-v27";
+const CACHE_NAME = "enkephalos-recorder-v28";
 const APP_SHELL = [
   "./index.html",
   "./app.js",
